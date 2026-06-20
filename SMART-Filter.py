@@ -51,8 +51,6 @@ class CementFilterAdvancedSimulation:
         facteur_temperature = np.sqrt((temperature + 273.15) / 293.15)
         
         # --- CAPTEUR 1 : MESURE PAR IMPACT ---
-        # Si l'encrassement est actif, la sonde s'entoure d'une couche isolante de ciment
-        # qui réduit exponentiellement sa capacité à capter les chocs directs.
         if fouling_active:
             facteur_encrassement = np.exp(-0.015 * t)  # Perte de sensibilité continue
         else:
@@ -62,7 +60,6 @@ class CementFilterAdvancedSimulation:
         raw_impact = max(0.0, (c_out * gain_impact) + np.random.normal(0.0, self.noise_impact))
 
         # --- CAPTEUR 2 : CAGE DE FARADAY (ÉCOULEMENT) ---
-        # Pas d'encrassement car la mesure se fait à travers le flux gazeux sans contact (Théorème de Gauss)
         gain_faraday = self.k_faraday_zero * facteur_temperature
         raw_faraday = max(0.0, (c_out * gain_faraday) + np.random.normal(0.0, self.noise_faraday))
          
@@ -88,7 +85,7 @@ with tab1:
     trigger_fouling = st.sidebar.toggle("Activer l'encrassement (Sonde Impact)", value=True)
     speed = st.sidebar.slider("Fréquence d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
-    # --- INITIALISATION DE L'HISTORIQUE DES SESSIONS ---
+    # --- INITIALISATION INDÉPENDANTE DE CHAQUE VARIABLE ---
     if 'time_steps' not in st.session_state:
         st.session_state.time_steps = []
     if 'raw_impact' not in st.session_state:
@@ -123,15 +120,26 @@ with tab1:
         st.session_state.ema_faraday_state = None
         st.rerun()
 
-    # --- SCRIPT DE COMPILATION EXCEL EXPLOITABLE ---
-    if len(st.session_state.time_steps) > 0:
+    # --- CORRECTION ET SÉCURISATION DU BLOC D'EXPORTATION EXCEL ---
+    lengths = [
+        len(st.session_state.time_steps),
+        len(st.session_state.raw_impact),
+        len(st.session_state.filtered_impact),
+        len(st.session_state.raw_faraday),
+        len(st.session_state.filtered_faraday),
+        len(st.session_state.efficiencies_faraday)
+    ]
+    min_len = min(lengths) if lengths else 0
+
+    if min_len > 0:
+        # Création sécurisée avec indexation synchronisée à min_len
         df_export = pd.DataFrame({
-            "Temps (Iterations)": list(st.session_state.time_steps),
-            "Sonde Impact - Brute (pC)": list(st.session_state.raw_impact),
-            "Sonde Impact - Filtree EMA (pC)": list(st.session_state.filtered_impact),
-            "Cage Faraday - Brute (pC)": list(st.session_state.raw_faraday),
-            "Cage Faraday - Filtree EMA (pC)": list(st.session_state.filtered_faraday),
-            "Rendement Estime par Cage Faraday (%)": list(st.session_state.efficiencies_faraday)
+            "Temps (Iterations)": list(st.session_state.time_steps)[:min_len],
+            "Sonde Impact - Brute (pC)": list(st.session_state.raw_impact)[:min_len],
+            "Sonde Impact - Filtree EMA (pC)": list(st.session_state.filtered_impact)[:min_len],
+            "Cage Faraday - Brute (pC)": list(st.session_state.raw_faraday)[:min_len],
+            "Cage Faraday - Filtree EMA (pC)": list(st.session_state.filtered_faraday)[:min_len],
+            "Rendement Estime par Cage Faraday (%)": list(st.session_state.efficiencies_faraday)[:min_len]
         })
         
         excel_buffer = io.BytesIO()
@@ -176,7 +184,7 @@ with tab1:
             estimated_c_out_faraday = st.session_state.ema_faraday_state / dynamic_gain_faraday
             estimated_eff_faraday = 1.0 - (estimated_c_out_faraday / sim.base_concentration)
             
-            # Débit massique absolu (kg/h) calculé sur l'induction fiable de la cage de Faraday
+            # Débit massique absolu (kg/h)
             flux_massique_kgh = (estimated_c_out_faraday * sim.debit_air_nominal) / 1000000.0
              
             # Remplissage des buffers historiques (limités aux 100 dernières itérations)
@@ -197,7 +205,7 @@ with tab1:
                  
             # --- CONFIGURATION DU TRACÉ DES GRAPHES COMPARATIFS ---
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                                subplot_titles=("Sonde Triboélectrique par Impact Claddée (Non blindée)", 
+                                subplot_titles=("Sonde Triboélectrique par Impact Classique (Non blindée)", 
                                                 "Votre Capteur Coaxial à Écoulement (Cage de Faraday Blindée)", 
                                                 "Rendement Calculé par la Cage de Faraday (%)"))
             
@@ -244,7 +252,6 @@ with tab1:
                     delta_color="inverse"
                 )
                 
-                # Comparaison des niveaux de charge filtrée pour mettre en évidence l'affaiblissement par encrassement
                 c2.metric(
                     label="Signal Cage de Faraday (Stable)",
                     value=f"{st.session_state.ema_faraday_state:.2f} pC",
@@ -287,29 +294,4 @@ with tab2:
         "Sonde à Impact Classique": [
             "Choc mécanique direct et transfert de charge par friction locale.",
             "Très élevée. La poussière de ciment crée une couche isolante sur la tige.",
-            "Élevé. L'absence de blindage capte les parasites des moteurs et variateurs.",
-            "Fréquente (Nécessite des nettoyages pneumatiques réguliers).",
-            "Décroissant. Le signal s'atténue à mesure que la sonde s'encrasse."
-        ],
-        "Votre Cage de Faraday (Écoulement)": [
-            "Théorème de Gauss. Induction électrostatique sans contact à travers un flux continu.",
-            "Nul. Aucun contact requis avec l'élément de mesure central.",
-            "Extrêmement faible. Le cylindre externe fait office de blindage à la masse.",
-            "Quasi inexistante (Géométrie coaxiale autonettoyante par le flux gazeux).",
-            "Constant et stable. Uniquement lié à la température et au débit."
-        ]
-    }
-    st.table(compa_data)
-
-    st.markdown("---")
-    st.subheader("🔬 Équations de Modélisation du Capteur Coaxial (Faraday)")
-     
-    st.markdown("#### A. Application du Théorème de Gauss")
-    st.write("Lorsqu'un nuage de particules portant une charge volumique intrinsèque $q_v(t)$ s'écoule au centre du cylindre de mesure interne, une charge électrique strictement opposée est induite à sa surface par influence totale :")
-    st.latex(r"Q_{induit}(t) = - \iiint_{v} q_v(t) \cdot dV")
-    st.write("Le cylindre coaxial externe est maintenu au potentiel zéro de la terre ($V_{exterieur} = 0\\text{ V}$), annulant le champ électrique externe d'origine parasite.")
-
-    st.markdown("#### B. Dynamique d'atténuation de la sonde d'impact")
-    st.write("À l'inverse, la perte d'efficacité de captation par impact due à l'accumulation de poussières de ciment suit une loi de dégradation exponentielle, paramétrée dans l'application :")
-    st.latex(r"k_{impact}(t) = k_{0, impact} \cdot \sqrt{\frac{T_{gaz} + 273.15}{293.15}} \cdot e^{-\lambda t}")
-    st.write("Où $\\lambda$ représente le coefficient d'encrassement. Cela explique pourquoi, sur vos graphiques, la courbe rouge s'effondre alors que votre courbe bleue (Faraday) reste stable et continue de surveiller fidèlement le rendement réel.")
+            "Élevé. L'absence de blindage capte
