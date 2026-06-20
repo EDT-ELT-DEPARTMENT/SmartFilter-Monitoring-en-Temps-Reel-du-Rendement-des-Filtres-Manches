@@ -7,7 +7,17 @@ import pandas as pd
 import io
 import datetime
 import streamlit.components.v1 as components
-
+# Masquer les éléments du menu supérieur (Share, Star, Edit, etc.)
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            header {visibility: hidden;}
+            footer {visibility: hidden;}
+            .stAppDeployButton {display:none;}
+            #stDecoration {display:none;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 # Configuration complète de la page de l'application
 st.set_page_config(
     page_title="SmartFilter Monitor - Dispositif Expérimental",
