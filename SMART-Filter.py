@@ -8,7 +8,7 @@ import io
 
 # Configuration complète de la page de l'application
 st.set_page_config(
-    page_title="SmartFilter Monitor - Filtrage Affichage",
+    page_title="SmartFilter Monitor - Export Excel",
     layout="wide"
 )
 
@@ -77,6 +77,30 @@ class CementFilterFaradaySimulation:
 # Instanciation du modèle de simulation
 sim = CementFilterFaradaySimulation()
 
+# --- INITIALISATION REQUIRÉE DES ÉTATS DE SESSION STREAMLIT ---
+if 'time_steps' not in st.session_state:
+    st.session_state.time_steps = []
+if 'raw_carcasse' not in st.session_state:
+    st.session_state.raw_carcasse = []
+if 'filtered_carcasse' not in st.session_state:
+    st.session_state.filtered_carcasse = []
+if 'raw_faraday' not in st.session_state:
+    st.session_state.raw_faraday = []
+if 'filtered_faraday' not in st.session_state:
+    st.session_state.filtered_faraday = []
+if 'voltage_faraday' not in st.session_state:
+    st.session_state.voltage_faraday = []
+if 'charge_acquise_pC' not in st.session_state:
+    st.session_state.charge_acquise_pC = []
+if 'efficiencies_calculated' not in st.session_state:
+    st.session_state.efficiencies_calculated = []
+if 'current_step' not in st.session_state:
+    st.session_state.current_step = 0
+if 'ema_carcasse_state' not in st.session_state:
+    st.session_state.ema_carcasse_state = None
+if 'ema_faraday_state' not in st.session_state:
+    st.session_state.ema_faraday_state = None
+
 # --- CONFIGURATION DU PANNEAU LATÉRAL (SIDEBAR) ---
 st.sidebar.header("Paramètres Opérationnels")
 run_simulation = st.sidebar.toggle("Activer l'acquisition en direct", value=True)
@@ -100,6 +124,38 @@ trigger_mechanical = st.sidebar.toggle("Simuler une déchirure de manche", value
 trigger_cem_noise = st.sidebar.toggle("Injecter des parasites CEM (Masse)", value=True)
 speed = st.sidebar.slider("Intervalle d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
+# --- BLOC COMPLET D'EXPORTATION EN FICHIER EXCEL (.XLSX) ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("💾 Exportation des Données")
+
+if len(st.session_state.time_steps) > 0:
+    # Structuration des vecteurs de données dans un dictionnaire ordonné
+    data_dictionnaire = {
+        "Index Échantillon": list(st.session_state.time_steps),
+        "Courant de Carcasse Filtré (nA)": list(st.session_state.filtered_carcasse),
+        "Tension mesurée au Shunt (V)": list(st.session_state.voltage_faraday),
+        "Charge Électrostatique Acquise (pC)": list(st.session_state.charge_acquise_pC),
+        "Rendement de Filtration Estimé (%)": list(st.session_state.efficiencies_calculated)
+    }
+    
+    df_export = pd.DataFrame(data_dictionnaire)
+    
+    # Écriture binaire en mémoire tampon via IO et Pandas ExcelWriter
+    output_buffer = io.BytesIO()
+    with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+        df_export.to_excel(writer, index=False, sheet_name='Données_Filtration_EDT')
+    
+    processed_data = output_buffer.getvalue()
+    
+    st.sidebar.download_button(
+        label="📥 Télécharger la table Excel",
+        data=processed_data,
+        file_name="Donnees_Cage_Faraday_EDT_2026.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+else:
+    st.sidebar.info("En attente de relevés physiques pour compiler le tableur Excel.")
+
 # Configuration des onglets de visualisation
 tab1, tab2 = st.tabs(["📊 Tableau de Bord Temps Réel", "🔬 Rappels Théoriques & Formules"])
 
@@ -107,30 +163,6 @@ tab1, tab2 = st.tabs(["📊 Tableau de Bord Temps Réel", "🔬 Rappels Théoriq
 # ONGLET 1 : AFFICHAGE DU TABLEAU DE BORD TEMPS RÉEL
 # ===================================================
 with tab1:
-    # Initialisation des banques de données temporelles dans la session Streamlit
-    if 'time_steps' not in st.session_state:
-        st.session_state.time_steps = []
-    if 'raw_carcasse' not in st.session_state:
-        st.session_state.raw_carcasse = []
-    if 'filtered_carcasse' not in st.session_state:
-        st.session_state.filtered_carcasse = []
-    if 'raw_faraday' not in st.session_state:
-        st.session_state.raw_faraday = []
-    if 'filtered_faraday' not in st.session_state:
-        st.session_state.filtered_faraday = []
-    if 'voltage_faraday' not in st.session_state:
-        st.session_state.voltage_faraday = []
-    if 'charge_acquise_pC' not in st.session_state:
-        st.session_state.charge_acquise_pC = []
-    if 'efficiencies_calculated' not in st.session_state:
-        st.session_state.efficiencies_calculated = []
-    if 'current_step' not in st.session_state:
-        st.session_state.current_step = 0
-    if 'ema_carcasse_state' not in st.session_state:
-        st.session_state.ema_carcasse_state = None
-    if 'ema_faraday_state' not in st.session_state:
-        st.session_state.ema_faraday_state = None
-
     # Conteneur dynamique unique pour rafraîchir l'affichage sans scintillement
     placeholder = st.empty()
 
@@ -147,7 +179,7 @@ with tab1:
             else:
                 st.session_state.ema_carcasse_state = (sim.alpha * r_carcasse) + ((1.0 - sim.alpha) * st.session_state.ema_carcasse_state)
              
-            # Lissage numérique du courant de la cage de Faraday (Calcul interne uniquement)
+            # Lissage numérique du courant de la cage de Faraday (Calcul interne uniquement, masqué du UI)
             if st.session_state.ema_faraday_state is None:
                 st.session_state.ema_faraday_state = r_faraday
             else:
@@ -198,7 +230,7 @@ with tab1:
                 )
             )
             
-            # Graphe 1 : Courant de Carcasse seul (Faraday supprimé)
+            # Graphe 1 : Courant de Carcasse seul (Faraday supprimé de la légende et du tracé)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_carcasse),
                                      name="Courant Carcasse (Drainage -)", line=dict(color='#e67e22', width=2.5)), row=1, col=1)
             
@@ -223,7 +255,7 @@ with tab1:
                 if t_damage:
                     st.error(f"🚨 EXTRUSION THERMIQUE CRITIQUE : Température de {gas_temp}°C supérieure à la limite admissible des manches P84 (240°C).")
                 elif delta_verification > 5.0 and trigger_cem_noise:
-                    st.warning(f"⚡ PARASITES DE MASSE DÉTECTÉS (CEM) : Écart de {delta_verification:.2f} nA entre la masse instable et l'induction isolée.")
+                    st.warning(f"⚡ PARASITES DE MASSE DÉTECTÉS (CEM) : Écart de {delta_verification:.2f} nA détecté sur le circuit de masse externe.")
                 elif estimated_eff < 0.992:
                     st.error(f"📉 CHUTE DU RENDEMENT DE FILTRATION : Fuite détectée par l'étage de mesure. Rendement bas : {estimated_eff*100:.3f}%")
                 else:
@@ -244,7 +276,7 @@ with tab1:
                     st.metric(
                         label="⚛️ Charge Acquise (Q)",
                         value=f"{q_inst_pC:.2f} pC",
-                        delta="Charge cumulée inductrice"
+                        delta="Charge cumulée"
                     )
                 with col3:
                     st.metric(
