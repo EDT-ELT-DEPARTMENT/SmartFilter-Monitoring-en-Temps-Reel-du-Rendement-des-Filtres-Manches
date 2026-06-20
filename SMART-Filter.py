@@ -9,14 +9,14 @@ import datetime
 
 # Configuration complète de la page de l'application
 st.set_page_config(
-    page_title="SmartFilter Monitor - Export Temporel",
+    page_title="SmartFilter Monitor - Dispositif Expérimental",
     layout="wide"
 )
 
 # --- EN-TÊTE RÉGLEMENTAIRE ET RAPPEL DU TITRE EXIGÉ ---
 st.title("SmartFilter Monitor")
 st.subheader("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
-st.markdown("### ⚡ Analyseur Différentiel : Relevés Électrostatiques Temporels & Export Excel")
+st.markdown("### ⚡ Analyseur Différentiel : Relevés Électrostatiques Temporels & Spécifications")
 
 # --- COEUR DE MODÉLISATION PHYSIQUE BILATERALE ---
 class CementFilterFaradaySimulation:
@@ -82,7 +82,7 @@ sim = CementFilterFaradaySimulation()
 if 'time_steps' not in st.session_state:
     st.session_state.time_steps = []
 if 'timestamps' not in st.session_state:
-    st.session_state.timestamps = []  # Nouvelle banque de données pour stocker le temps réel
+    st.session_state.timestamps = []
 if 'raw_carcasse' not in st.session_state:
     st.session_state.raw_carcasse = []
 if 'filtered_carcasse' not in st.session_state:
@@ -115,7 +115,6 @@ st.sidebar.markdown(fr"""
 * **Longueur utile ($L$) :** {sim.longueur_L * 100:.1f} cm
 * **Diamètre Intérieur ($\varnothing_{{int}}$) :** {sim.diametre_int:.1f} mm
 * **Diamètre Extérieur ($\varnothing_{{ext}}$) :** {sim.diametre_ext:.1f} mm
-* **Milieu Diélectrique :** Air sec ($\varepsilon_r \approx 1$)
 * **Capacité de la Cage ($C_{{cage}}$) :** **{sim.capacite_faraday * 1e12:.2f} pF**
 * **Résistance Shunt ($R_{{shunt}}$) :** {sim.r_shunt / 1e6:.1f} M$\Omega$
 """)
@@ -127,12 +126,11 @@ trigger_mechanical = st.sidebar.toggle("Simuler une déchirure de manche", value
 trigger_cem_noise = st.sidebar.toggle("Injecter des parasites CEM (Masse)", value=True)
 speed = st.sidebar.slider("Intervalle d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
-# --- BLOC D'EXPORTATION EN FICHIER EXCEL (.XLSX) CALIBRÉ SUR LE TEMPS ---
+# --- BLOC D'EXPORTATION EN FICHIER EXCEL (.XLSX) ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("💾 Exportation des Données")
 
 if len(st.session_state.timestamps) > 0:
-    # Intégration de l'horodatage réel au lieu des simples index numériques
     data_dictionnaire = {
         "Horodatage (Temps Réel)": list(st.session_state.timestamps),
         "Courant de Carcasse Filtré (nA)": list(st.session_state.filtered_carcasse),
@@ -142,12 +140,9 @@ if len(st.session_state.timestamps) > 0:
     }
     
     df_export = pd.DataFrame(data_dictionnaire)
-    
-    # Écriture binaire en mémoire tampon via IO
     output_buffer = io.BytesIO()
     with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False, sheet_name='Données_Temporelles_EDT')
-    
     processed_data = output_buffer.getvalue()
     
     st.sidebar.download_button(
@@ -159,8 +154,12 @@ if len(st.session_state.timestamps) > 0:
 else:
     st.sidebar.info("En attente de relevés temporels pour compiler le tableur Excel.")
 
-# Configuration des onglets de visualisation
-tab1, tab2 = st.tabs(["📊 Tableau de Bord Temps Réel", "🔬 Rappels Théoriques & Formules"])
+# --- DÉFINITION DES TROIS ONGLETS DE L'INTERFACE ---
+tab1, tab2, tab3 = st.tabs([
+    "📊 Tableau de Bord Temps Réel", 
+    "🔬 Rappels Théoriques & Formules", 
+    "📐 Dispositif Expérimental"
+])
 
 # ===================================================
 # ONGLET 1 : AFFICHAGE DU TABLEAU DE BORD TEMPS RÉEL
@@ -171,38 +170,31 @@ with tab1:
     if run_simulation:
         while True:
             t = st.session_state.current_step
-            
-            # Capturer l'instant exact avec millisecondes pour un suivi haute précision
             now_str = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
             
             r_carcasse, r_faraday, true_eff, t_damage, q_sec, m_fuite_sec = sim.generate_data_point(
                 t, trigger_mechanical, gas_temp, trigger_cem_noise
             )
              
-            # Lissage numérique du courant négatif de carcasse (EMA)
             if st.session_state.ema_carcasse_state is None:
                 st.session_state.ema_carcasse_state = r_carcasse
             else:
                 st.session_state.ema_carcasse_state = (sim.alpha * r_carcasse) + ((1.0 - sim.alpha) * st.session_state.ema_carcasse_state)
              
-            # Lissage numérique du courant de la cage de Faraday (Calcul interne masqué)
             if st.session_state.ema_faraday_state is None:
                 st.session_state.ema_faraday_state = r_faraday
             else:
                 st.session_state.ema_faraday_state = (sim.alpha * r_faraday) + ((1.0 - sim.alpha) * st.session_state.ema_faraday_state)
              
-            # --- CALCUL DES PARAMÈTRES ÉLECTRIQUES ---
             v_real_faraday = (st.session_state.ema_faraday_state * 1e-9) * sim.r_shunt
             q_inst_pC = (sim.capacite_faraday * v_real_faraday) * 1e12
             
-            # Estimation du rendement de filtrage
             facteur_t = np.sqrt((gas_temp + 273.15) / 293.15)
             i_max_theorique = ((sim.base_concentration * q_sec) / 1000.0) * (sim.k_tribo_base * facteur_t)
             estimated_eff = 1.0 - (st.session_state.ema_faraday_state / i_max_theorique)
             
-            # Enregistrement dans les banques de données de session
             st.session_state.time_steps.append(t)
-            st.session_state.timestamps.append(now_str)  # Sauvegarde chronologique
+            st.session_state.timestamps.append(now_str)
             st.session_state.raw_carcasse.append(r_carcasse)
             st.session_state.filtered_carcasse.append(st.session_state.ema_carcasse_state)
             st.session_state.raw_faraday.append(r_faraday)
@@ -211,7 +203,6 @@ with tab1:
             st.session_state.charge_acquise_pC.append(q_inst_pC)
             st.session_state.efficiencies_calculated.append(estimated_eff * 100.0)
              
-            # Fenêtre glissante limitée à 80 points pour le graphique dynamique
             if len(st.session_state.time_steps) > 80:
                 st.session_state.time_steps.pop(0)
                 st.session_state.timestamps.pop(0)
@@ -223,7 +214,6 @@ with tab1:
                 st.session_state.charge_acquise_pC.pop(0)
                 st.session_state.efficiencies_calculated.pop(0)
                  
-            # --- ARCHITECTURE DES GRAPHIQUES AVEC TIMESTAMPS SUR L'AXE X ---
             fig = make_subplots(
                 rows=3, cols=1, 
                 shared_xaxes=True, 
@@ -235,13 +225,10 @@ with tab1:
                 )
             )
             
-            # Utilisation des timestamps réels pour l'affichage graphique fluide
             fig.add_trace(go.Scatter(x=list(st.session_state.timestamps), y=list(st.session_state.filtered_carcasse),
                                      name="Courant Carcasse (Drainage -)", line=dict(color='#e67e22', width=2.5)), row=1, col=1)
-            
             fig.add_trace(go.Scatter(x=list(st.session_state.timestamps), y=list(st.session_state.charge_acquise_pC),
                                      name="Charge Induite (Q)", line=dict(color='#9b59b6', width=2.5)), row=2, col=1)
-            
             fig.add_trace(go.Scatter(x=list(st.session_state.timestamps), y=list(st.session_state.efficiencies_calculated),
                                      name="Rendement (%)", line=dict(color='#2ecc71', width=2)), row=3, col=1)
             
@@ -251,7 +238,6 @@ with tab1:
             fig.update_yaxes(title_text="Rendement (%)", row=3, col=1)
             fig.update_xaxes(title_text="Horodatage de Mesure (Heure:Min:Sec.ms)", row=3, col=1)
             
-            # Rendu dynamique
             with placeholder.container():
                 delta_verification = abs(abs(st.session_state.ema_carcasse_state) - st.session_state.ema_faraday_state)
                 
@@ -264,36 +250,17 @@ with tab1:
                 else:
                     st.success(f"✅ SYSTEME EN LIGNE [{now_str}] : Comportement nominal et écoulement stable vers le puits de terre.")
 
-                # --- AFFICHAGE SYNOPTIQUE (4 COLONNES) ---
                 st.markdown("#### 🎛️ Indicateurs d'Acquisition de l'Interface")
                 col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    st.metric(
-                        label="🔏 Courant de Carcasse",
-                        value=f"{st.session_state.ema_carcasse_state:.2f} nA",
-                        delta="Drainage négatif (-)",
-                        delta_color="inverse"
-                    )
+                    st.metric(label="🔏 Courant de Carcasse", value=f"{st.session_state.ema_carcasse_state:.2f} nA", delta="Drainage négatif (-)", delta_color="inverse")
                 with col2:
-                    st.metric(
-                        label="⚛️ Charge Acquise (Q)",
-                        value=f"{q_inst_pC:.2f} pC",
-                        delta="Charge cumulée"
-                    )
+                    st.metric(label="⚛️ Charge Acquise (Q)", value=f"{q_inst_pC:.2f} pC", delta="Charge cumulée")
                 with col3:
-                    st.metric(
-                        label="🔌 Tension du Shunt",
-                        value=f"{v_real_faraday:.3f} V",
-                        delta=f"Mesure sur {sim.r_shunt/1e6:.1f} MΩ"
-                    )
+                    st.metric(label="🔌 Tension du Shunt", value=f"{v_real_faraday:.3f} V", delta=f"Mesure sur {sim.r_shunt/1e6:.1f} MΩ")
                 with col4:
-                    st.metric(
-                        label="📈 Rendement de Filtration",
-                        value=f"{estimated_eff * 100.0:.3f} %",
-                        delta=f"{m_fuite_sec*1000:.1f} mg/s de fuite",
-                        delta_color="inverse" if estimated_eff < 0.995 else "normal"
-                    )
+                    st.metric(label="📈 Rendement de Filtration", value=f"{estimated_eff * 100.0:.3f} %", delta=f"{m_fuite_sec*1000:.1f} mg/s de fuite", delta_color="inverse" if estimated_eff < 0.995 else "normal")
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
@@ -303,11 +270,10 @@ with tab1:
         st.info("⏸️ Système en attente d'acquisition. Activez le commutateur dans le volet latéral gauche pour lancer les captures.")
 
 # ===================================================
-# ONGLET 2 : RAPPELS THEORIQUES ET EQUATIONS
+# ONGLET 2 : RAPPELS THÉORIQUES ET ÉQUATIONS
 # ===================================================
 with tab2:
     st.header("Validation Électrotechnique du Capteur Cylindrique")
-    
     st.markdown("### 📐 Équation de Dimensionnement Fondamentale")
     st.write("La capacité géométrique d'une cage de Faraday coaxiale parfaite s'exprime par la relation de Gauss :")
     st.latex(r"C_{\text{cage}} = \frac{2 \pi \cdot \varepsilon_0 \cdot \varepsilon_r \cdot L}{\ln\left(\frac{R_2}{R_1}\right)}")
@@ -326,3 +292,60 @@ with tab2:
     st.subheader("🔬 Déduction de la Charge Électrostatique Cumulée ($Q$)")
     st.write("La charge instantanée acquise par influence électrostatique pure sur la paroi intérieure reste calculée de manière transparente à partir du Shunt d'adaptation :")
     st.latex(r"Q_{\text{acquise}}(t) = C_{\text{cage}} \times V_{\text{shunt}}(t) = C_{\text{cage}} \times \left( I_{\text{Faraday}}(t) \times R_{\text{shunt}} \right)")
+
+# ===================================================
+# ONGLET 3 : DISPOSITIF EXPÉRIMENTAL & INSTRUMENTATION
+# ===================================================
+with tab3:
+    st.header("📐 Architecture du Dispositif Expérimental")
+    st.markdown("""
+    Cette section détaille la configuration physique et l'interconnexion de l'installation pilote associant le **filtre à manches** industriel et le **capteur d'induction à cage de Faraday**.
+    """)
+    
+    st.subheader("📸 Synoptique Réel de l'Installation")
+    
+    # Message d'aide pour l'utilisateur
+    st.info("💡 **Note d'intégration :** Pour lier votre propre schéma graphique local, déposez votre fichier image (ex: `schema_pilote.png`) dans le répertoire de l'application et utilisez la commande `st.image('schema_pilote.png', caption='...')`.")
+    
+    # Dessin structurel/Maquette simulée en HTML/CSS pour l'affichage de la figure
+    st.markdown("""
+    <div style="border: 2px dashed #3498db; padding: 25px; border-radius: 12px; text-align: center; background-color: #f8f9fa; margin-bottom: 25px;">
+        <h4 style="color: #2980b9; margin-top: 0; font-family: Arial;">[ REPRÉSENTATION DU BANQUET D'ESSAIS EXPÉRIMENTAL ]</h4>
+        <p style="color: #555; font-size: 15px;"><b>Chaîne cinématique du flux particulaire et points de captage des signaux</b></p>
+        <div style="text-align: left; display: inline-block; max-width: 750px; margin-top: 15px; font-family: monospace; font-size: 14px; background: #fff; padding: 15px; border: 1px solid #ddd; border-radius: 6px;">
+            <b>[Flux d'air sale]</b> ➔ 🏭 Filtre à Manches (Tissu P84 + Fils conducteurs) <br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;📥 <i>Contact mécanique serré (Mannequin)</i> <br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;➔ Plaque à trous métallisée (Tubesheet) <br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;➔ <b>[Borne de Masse Négative]</b> ➔ 🔌 <b>Courant de Carcasse</b> ➔ 🌍 TERRE <br>
+            <br>
+            <b>[En cas de fuite particulaire]</b> ➔ 🛑 Échappement vers le conduit de mesure <br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;➔ Passation axiale à travers l'électrode interne (Ø 60 mm)<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;➔ 🛡️ <b>Cage de Faraday Coaxiale Isolée</b> (Blindage Ø 80 mm)<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;➔ Bloc de conditionnement ➔ <b>Résistance Shunt 2.5 MΩ</b> ➔ 🖥️ CAN / Streamlit
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Division en deux colonnes pour l'affichage de toutes les informations utiles
+    info_col1, info_col2 = st.columns(2)
+    
+    with info_col1:
+        st.markdown("### 🏭 Spécifications du Filtre à Manches (Média Filtrant)")
+        st.markdown(f"""
+        * **Nature du Média :** Fibres polyimides thermostables (Type P84) idéales pour l'industrie du ciment.
+        * **Structure Antistatique :** Maillage croisé de fils hautement conducteurs en acier inoxydable ou carbone tricotés à cœur pour évacuer les accumulations de charges par friction (effet triboélectrique).
+        * **Évacuation du Courant ($I_{{\text{{carcasse}}}}$) :** Établie par contact direct via le mannequin métallique de support, transitant par la plaque à trous pour finir sa course dans le réseau de terre de l'usine.
+        * **Conditions d'utilisation critiques :** * Débit nominal d'air : `{sim.debit_air_nominal:.0f} m³/h`
+            * Température maximale tolérée : `{sim.t_critique_tissu:.0f}°C`
+        """)
+        
+    with info_col2:
+        st.markdown("### 🔌 Instrumentation & Cage de Faraday Coaxiale")
+        st.markdown(f"""
+        * **Architecture du Capteur :** Double cylindre coaxial en alliage d'aluminium à géométrie fixe.
+        * **Géométrie de l'électrode utile :** Longueur active $L = {sim.longueur_L*100:.1f}\text{ cm}$ | Diamètre intérieur $\varnothing = {sim.diametre_int:.0f}\text{ mm}$.
+        * **Écran de Blindage externe :** Diamètre $\varnothing = {sim.diametre_ext:.0f}\text{ mm}$ raccordé à la masse électronique isolée pour éliminer toute influence électromagnétique ambiante (moteurs, commutateurs industriels).
+        * **Étage d'adaptation analogique :**
+            * Résistance de Shunt ultra-stable : `{sim.r_shunt/1e6:.1f} M\Omega`
+            * Rôle : Convertisseur Courant-Tension direct ($V = I \cdot R$) permettant de numériser les nano-ampères induits sans saturer l'étage microcontrôleur.
+        """)
