@@ -1,166 +1,136 @@
+import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from collections import deque
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import time
 
-class GasStream:
-    """Simule le flux de gaz chargé en particules à l'entrée du filtre."""
-    def __init__(self, base_concentration=1000.0, noise_std=50.0):
-        self.base_concentration = base_concentration # mg/m^3
-        self.noise_std = noise_std
+# Configuration de la page et rappel des spécifications de la plateforme
+st.set_page_config(
+    page_title="Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA",
+    layout="wide"
+)
 
-    def get_input_concentration(self):
-        """Retourne la concentration d'entrée avec une fluctuation stochastique."""
-        return max(0, np.random.normal(self.base_concentration, self.noise_std))
+# En-tête officiel de l'application
+st.title("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
+st.subheader("Module de Supervision : Monitoring Intelligent du Filtre à Manches")
 
-class BaghouseFilter:
-    """Modélise le filtre à manches et son rendement."""
-    def __init__(self, initial_efficiency=0.999):
-        self.efficiency = initial_efficiency # Rendement nominal (ex: 99.9%)
-        self.is_damaged = False
+# --- MODÉLISATION DU SYSTÈME PHYSIQUE ---
+class SmartFilterSimulation:
+    def __init__(self):
+        self.base_concentration = 1000.0  # mg/m^3
+        self.nominal_efficiency = 0.999   # 99.9%
+        self.sensor_gain = 5.0            # Facteur de conversion pA/(mg/m^3)
+        self.alpha = 0.15                 # Coefficient du filtre EMA
 
-    def trigger_damage(self, new_efficiency=0.985):
-        """Simule une rupture de manche entraînant une chute de rendement."""
-        self.efficiency = new_efficiency
-        self.is_damaged = True
+    def generate_data_point(self, t, is_damaged):
+        # 1. Évolution du rendement réel du filtre
+        current_eff = 0.985 if (is_damaged and t >= 50) else self.nominal_efficiency
+        
+        # 2. Concentration d'entrée bruitée
+        c_in = max(0.0, np.random.normal(self.base_concentration, 40.0))
+        
+        # 3. Concentration de sortie effective
+        c_out = c_in * (1.0 - current_eff)
+        
+        # 4. Signal brut du capteur électrostatique (Charge en pA)
+        raw_signal = max(0.0, (c_out * self.sensor_gain) + np.random.normal(0.0, 1.5))
+        
+        return raw_signal, current_eff
 
-    def filter_gas(self, input_concentration):
-        """Calcule la concentration de poussière s'échappant du filtre."""
-        return input_concentration * (1.0 - self.efficiency)
+# Initialisation de la simulation
+sim = SmartFilterSimulation()
 
-class TriboelectricSensor:
-    """Modélise le capteur électrostatique mesurant la charge des particules."""
-    def __init__(self, calibration_factor=2.5, noise_std=0.5):
-        # Le facteur de calibration convertit la concentration (mg/m^3) en signal (pA - picoAmpères)
-        self.k = calibration_factor 
-        self.noise_std = noise_std
+# --- INTERFACE DE CONTRÔLE SUR LA BARRE LATÉRALE ---
+st.sidebar.header("Paramètres de Contrôle")
+run_simulation = st.sidebar.toggle("Démarrer la simulation en temps réel", value=True)
+trigger_anomaly = st.sidebar.toggle("Simuler une rupture de manche (t >= 50)", value=False)
+speed = st.sidebar.slider("Délai de rafraîchissement (secondes)", 0.1, 1.0, 0.3)
 
-    def read_signal(self, output_concentration):
-        """Génère le signal électrique proportionnel à la charge détectée + bruit de ligne."""
-        signal_ideal = self.k * output_concentration
-        noise = np.random.normal(0, self.noise_std)
-        return max(0, signal_ideal + noise)
+# --- ESPACES DE STOCKAGE DES DONNÉES (SESSION STATE) ---
+if 'time_steps' not in st.session_state:
+    st.session_state.time_steps = []
+    st.session_state.raw_signals = []
+    st.session_state.filtered_signals = []
+    st.session_state.efficiencies = []
+    st.session_state.current_step = 0
+    st.session_state.ema_state = None
 
-class SmartMonitor:
-    """Traite le signal, estime le rendement et détecte les anomalies."""
-    def __init__(self, sensor_k, nominal_input_conc, alpha=0.1, alarm_threshold=0.99):
-        self.sensor_k = sensor_k
-        self.nominal_input_conc = nominal_input_conc
-        self.alpha = alpha # Facteur de lissage pour la Moyenne Mobile Exponentielle (EMA)
-        self.alarm_threshold = alarm_threshold
-        self.filtered_signal = 0.0
+# Bouton de réinitialisation
+if st.sidebar.button("Réinitialiser les graphiques"):
+    st.session_state.time_steps = []
+    st.session_state.raw_signals = []
+    st.session_state.filtered_signals = []
+    st.session_state.efficiencies = []
+    st.session_state.current_step = 0
+    st.session_state.ema_state = None
+    st.rerun()
 
-    def process_data(self, raw_signal):
-        """Filtre le signal et déduit les métriques de performance."""
-        # Filtrage EMA (Exponential Moving Average) pour réduire le bruit
-        if self.filtered_signal == 0.0:
-            self.filtered_signal = raw_signal
+# --- ZONE D'AFFICHAGE DYNAMIQUE ---
+# st.empty() sert de conteneur mis à jour en continu à chaque itération de la boucle
+placeholder = st.empty()
+
+if run_simulation:
+    while True:
+        t = st.session_state.current_step
+        
+        # Génération du nouveau point physique
+        raw_sig, true_eff = sim.generate_data_point(t, trigger_anomaly)
+        
+        # Application du filtre numérique EMA (Moyenne Mobile Exponentielle)
+        if st.session_state.ema_state is None:
+            st.session_state.ema_state = raw_sig
         else:
-            self.filtered_signal = (self.alpha * raw_signal) + ((1 - self.alpha) * self.filtered_signal)
-
-        # Déduction de la concentration de sortie basée sur la calibration
-        estimated_out_conc = self.filtered_signal / self.sensor_k
-
-        # Calcul du rendement estimé
-        estimated_efficiency = 1.0 - (estimated_out_conc / self.nominal_input_conc)
+            st.session_state.ema_state = (sim.alpha * raw_sig) + ((1.0 - sim.alpha) * st.session_state.ema_state)
         
-        # Logique d'alarme
-        alarm = estimated_efficiency < self.alarm_threshold
+        # Déduction du rendement estimé par le Smart Filtre
+        estimated_c_out = st.session_state.ema_state / sim.sensor_gain
+        estimated_eff = 1.0 - (estimated_c_out / sim.base_concentration)
         
-        return estimated_out_conc, estimated_efficiency, alarm
-
-# ==========================================
-# CONFIGURATION DE LA SIMULATION TEMPS RÉEL
-# ==========================================
-
-# Initialisation des composants
-stream = GasStream(base_concentration=1000.0)
-bag_filter = BaghouseFilter(initial_efficiency=0.999) # 99.9% d'efficacité
-sensor = TriboelectricSensor(calibration_factor=5.0, noise_std=1.2)
-monitor = SmartMonitor(sensor_k=5.0, nominal_input_conc=1000.0, alpha=0.15, alarm_threshold=0.992)
-
-# Paramètres de la fenêtre temporelle
-window_size = 200
-times = deque([0], maxlen=window_size)
-raw_signals = deque([0], maxlen=window_size)
-efficiencies = deque([1.0], maxlen=window_size)
-alarms = deque([False], maxlen=window_size)
-
-# Préparation de l'interface graphique
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-fig.canvas.manager.set_window_title('Monitoring Intelligent - Filtre à Manches')
-
-line_raw, = ax1.plot([], [], lw=1.5, color='gray', label='Signal brut (pA)', alpha=0.5)
-line_filtered, = ax1.plot([], [], lw=2, color='blue', label='Signal filtré (EMA)')
-ax1.set_xlim(0, window_size)
-ax1.set_ylim(0, 50)
-ax1.set_ylabel('Charge Électrostatique (pA)')
-ax1.set_title('Détection de la charge des particules en sortie')
-ax1.legend(loc='upper right')
-ax1.grid(True)
-
-line_eff, = ax2.plot([], [], lw=2, color='green', label='Rendement estimé (%)')
-threshold_line = ax2.axhline(y=99.2, color='red', linestyle='--', label='Seuil Alarme (99.2%)')
-alarm_text = ax2.text(0.02, 0.1, '', transform=ax2.transAxes, color='red', fontsize=12, fontweight='bold')
-ax2.set_xlim(0, window_size)
-ax2.set_ylim(97.5, 100.1)
-ax2.set_ylabel('Rendement (%)')
-ax2.set_xlabel('Temps (Itérations)')
-ax2.legend(loc='lower right')
-ax2.grid(True)
-
-time_step = [0]
-filtered_history = deque([0], maxlen=window_size)
-
-def update(frame):
-    t = time_step[0]
-    
-    # 1. Injection d'une anomalie physique à t=100 (Déchirure d'une manche)
-    if t == 100:
-        bag_filter.trigger_damage(new_efficiency=0.985)
+        # Sauvegarde dans l'historique (fenêtre glissante des 100 derniers points)
+        st.session_state.time_steps.append(t)
+        st.session_state.raw_signals.append(raw_sig)
+        st.session_state.filtered_signals.append(st.session_state.ema_state)
+        st.session_state.efficiencies.append(estimated_eff * 100.0)
         
-    # 2. Simulation de la physique
-    c_in = stream.get_input_concentration()
-    c_out = bag_filter.filter_gas(c_in)
-    
-    # 3. Mesure par le capteur (avec bruit électromagnétique)
-    raw_sig = sensor.read_signal(c_out)
-    
-    # 4. Traitement par le Smart Monitor
-    est_c_out, est_eff, is_alarm = monitor.process_data(raw_sig)
-    
-    # Mise à jour des historiques pour le graphique
-    times.append(t)
-    raw_signals.append(raw_sig)
-    filtered_history.append(monitor.filtered_signal)
-    efficiencies.append(est_eff * 100) # Conversion en pourcentage
-    alarms.append(is_alarm)
-    
-    # Ajustement de l'axe X pour l'effet de défilement (scrolling)
-    if t >= window_size:
-        ax1.set_xlim(t - window_size, t)
-        ax2.set_xlim(t - window_size, t)
+        if len(st.session_state.time_steps) > 100:
+            st.session_state.time_steps.pop(0)
+            st.session_state.raw_signals.pop(0)
+            st.session_state.filtered_signals.pop(0)
+            st.session_state.efficiencies.pop(0)
+            
+        # Construction des graphiques avec Plotly
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15)
         
-    # Mise à jour des courbes
-    line_raw.set_data(times, raw_signals)
-    line_filtered.set_data(times, filtered_history)
-    
-    # Coloration dynamique de la courbe de rendement
-    line_eff.set_data(times, efficiencies)
-    if is_alarm:
-        line_eff.set_color('red')
-        alarm_text.set_text('⚠️ ALARME : CHUTE DE RENDEMENT DÉTECTÉE !')
-        fig.patch.set_facecolor('#ffe6e6') # Clignotement du fond en rouge
-    else:
-        line_eff.set_color('green')
-        alarm_text.set_text('Système Normal')
-        fig.patch.set_facecolor('white')
+        # Graphique 1 : Signal Électrostatique (Charge des particules)
+        fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_signals),
+                                 name="Signal Brut (pA)", line=dict(color='rgba(150,150,150,0.5)', width=1)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_signals),
+                                 name="Signal Filtré (EMA)", line=dict(color='#1f77b4', width=2.5)), row=1, col=1)
         
-    time_step[0] += 1
-    return line_raw, line_filtered, line_eff, alarm_text
-
-# Lancement de la boucle d'animation
-ani = animation.FuncAnimation(fig, update, frames=1000, interval=100, blit=False)
-
-plt.tight_layout()
-plt.show()
+        # Graphique 2 : Rendement mesuré vs Seuil d'alarme
+        fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.efficiencies),
+                                 name="Rendement Estimé (%)", line=dict(color='#2ca02c', width=2.5)), row=2, col=1)
+        
+        # Ligne de seuil critique (99.2%)
+        fig.add_hline(y=99.2, line_dash="dash", line_color="red", annotation_text="Seuil Critique (99.2%)", row=2, col=1)
+        
+        # Mise en forme globale du layout
+        fig.update_layout(height=600, showlegend=True, margin=dict(l=20, r=20, t=20, b=20))
+        fig.update_yaxes(title_text="Charge Électrostatique (pA)", row=1, col=1)
+        fig.update_yaxes(title_text="Rendement (%)", row=2, col=1)
+        fig.update_xaxes(title_text="Temps (Itérations)", row=2, col=1)
+        
+        # Injection du contenu dynamique dans le conteneur principal
+        with placeholder.container():
+            # Diagnostic d'alarme en temps réel
+            if estimated_eff < 0.992:
+                st.error(f"⚠️ ALARME CRITIQUE : Chute de rendement détectée ! Rendement actuel : {estimated_eff*100:.3f}%")
+            else:
+                st.success(f"✅ Système stable : Filtration nominale en cours. Rendement actuel : {estimated_eff*100:.3f}%")
+                
+            st.plotly_chart(fig, use_container_width=True)
+            
+        st.session_state.current_step += 1
+        time.sleep(speed)
+else:
+    st.info("Simulation en pause. Activez le bouton dans la barre latérale pour lancer le monitoring.")
