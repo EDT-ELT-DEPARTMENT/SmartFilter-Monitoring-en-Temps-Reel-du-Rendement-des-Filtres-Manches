@@ -27,27 +27,27 @@ class CementFilterSimulation:
     def generate_data_point(self, t, is_mechanically_damaged, temperature):
         # 1. Calcul de la dégradation (Mécanique ou Thermique si T > T_critique)
         thermal_damage = temperature > self.t_critique_tissu
-        
+         
         if is_mechanically_damaged or thermal_damage:
             current_eff = 0.978  # Rupture de l'étanchéité des manches
         else:
             current_eff = self.nominal_efficiency
-        
+         
         # 2. Concentration d'entrée brute du four (fluctuations industrielles)
         c_in = max(0.0, np.random.normal(self.base_concentration, 60.0))
-        
+         
         # 3. Concentration de sortie effective
         c_out = c_in * (1.0 - current_eff)
-        
+         
         # 4. Impact de la température sur la charge induite
         # La température dilate les gaz et augmente la vitesse des chocs particulaires sur la sonde.
         # Plus l'impact est énergétique, plus la charge transférée par triboélectricité augmente.
         facteur_temperature = np.sqrt((temperature + 273.15) / 293.15)
         sensor_gain = self.k_zero * facteur_temperature
-        
+         
         # 5. Génération de la charge brute induite (en pC) avec bruit de fond
         raw_charge = max(0.0, (c_out * sensor_gain) + np.random.normal(0.0, 2.0))
-        
+         
         return raw_charge, current_eff, thermal_damage
 
 # Initialisation de la simulation
@@ -62,20 +62,30 @@ tab1, tab2 = st.tabs(["📊 Supervision Process Temps Réel", "🔬 Fiche Techni
 with tab1:
     st.sidebar.header("Paramètres Opérationnels")
     run_simulation = st.sidebar.toggle("Démarrer le monitoring", value=True)
-    
+     
     st.sidebar.markdown("---")
     st.sidebar.subheader("Contrôle du Procédé Four/Broyeur")
     gas_temp = st.sidebar.slider("Température des gaz entrants (°C)", 120, 280, 210)
     trigger_mechanical = st.sidebar.toggle("Simuler une déchirure mécanique", value=False)
     speed = st.sidebar.slider("Fréquence d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
-    # État de la session (Mémoire de l'application)
+    # --- CORRECTION DE L'INITIALISATION VARIABLE PAR VARIABLE ---
     if 'time_steps' not in st.session_state:
         st.session_state.time_steps = []
+        
+    if 'raw_charges' not in st.session_state:
         st.session_state.raw_charges = []
+        
+    if 'filtered_charges' not in st.session_state:
         st.session_state.filtered_charges = []
+        
+    if 'efficiencies' not in st.session_state:
         st.session_state.efficiencies = []
+        
+    if 'current_step' not in st.session_state:
         st.session_state.current_step = 0
+        
+    if 'ema_state' not in st.session_state:
         st.session_state.ema_state = None
 
     if st.sidebar.button("Réinitialiser l'historique"):
@@ -93,33 +103,33 @@ with tab1:
         while True:
             t = st.session_state.current_step
             raw_chg, true_eff, t_damage = sim.generate_data_point(t, trigger_mechanical, gas_temp)
-            
+             
             # Application du filtre numérique EMA sur la charge
             if st.session_state.ema_state is None:
                 st.session_state.ema_state = raw_chg
             else:
                 st.session_state.ema_state = (sim.alpha * raw_chg) + ((1.0 - sim.alpha) * st.session_state.ema_state)
-            
+             
             # Ajustement thermodynamique inverse du gain du capteur
             facteur_t = np.sqrt((gas_temp + 273.15) / 293.15)
             dynamic_gain = sim.k_zero * facteur_t
-            
+             
             # Inversion mathématique : conversion Charge (pC) -> Concentration -> Rendement
             estimated_c_out = st.session_state.ema_state / dynamic_gain
             estimated_eff = 1.0 - (estimated_c_out / sim.base_concentration)
-            
+             
             # Stockage dans l'historique glissant
             st.session_state.time_steps.append(t)
             st.session_state.raw_charges.append(raw_chg)
             st.session_state.filtered_charges.append(st.session_state.ema_state)
             st.session_state.efficiencies.append(estimated_eff * 100.0)
-            
+             
             if len(st.session_state.time_steps) > 100:
                 st.session_state.time_steps.pop(0)
                 st.session_state.raw_charges.pop(0)
                 st.session_state.filtered_charges.pop(0)
                 st.session_state.efficiencies.pop(0)
-                
+                 
             # Tracé dynamique Plotly (Unités mises à jour en pC)
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_charges),
@@ -129,12 +139,12 @@ with tab1:
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.efficiencies),
                                      name="Rendement Estimé (%)", line=dict(color='#2ca02c', width=2.5)), row=2, col=1)
             fig.add_hline(y=99.2, line_dash="dash", line_color="red", annotation_text="Seuil Alarme (99.2%)", row=2, col=1)
-            
+             
             fig.update_layout(height=550, showlegend=True, margin=dict(l=20, r=20, t=10, b=10))
             fig.update_yaxes(title_text="Charge Électrostatique (pC)", row=1, col=1)
             fig.update_yaxes(title_text="Rendement (%)", row=2, col=1)
             fig.update_xaxes(title_text="Temps (Itérations)", row=2, col=1)
-            
+             
             with placeholder.container():
                 if t_damage:
                     st.error(f"🚨 ALARME THERMIQUE : Gaz à {gas_temp}°C > Limite du tissu Polyimide P84 (240°C) ! Destruction thermique des manches en cours.")
@@ -142,9 +152,9 @@ with tab1:
                     st.warning(f"⚠️ ANOMALIE DE FILTRATION : Fuite détectée (Rupture ou usure mécanique). Rendement : {estimated_eff*100:.3f}%")
                 else:
                     st.success(f"✅ PROCÉDÉ SÉCURISÉ : Tissu P84 stable à {gas_temp}°C. Filtration nominale : {estimated_eff*100:.3f}%")
-                
+                 
                 st.plotly_chart(fig, use_container_width=True)
-                
+                 
             st.session_state.current_step += 1
             time.sleep(speed)
     else:
@@ -155,7 +165,7 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("Spécifications Avancées du Filtre - Environnement Cimenterie")
-    
+     
     st.subheader("📋 Caractéristiques du Tissu Sélectionné : Polyimide P84®")
     data_tissu = {
         "Propriété Physique": [
@@ -178,12 +188,12 @@ with tab2:
         ]
     }
     st.table(data_tissu)
-    
+     
     st.markdown("---")
-    
+     
     # Équations physiques révisées avec la variable de CHARGE Q(t)
     st.subheader("🔬 Couplage Thermo-Électrostatique (Équations de Modélisation)")
-    
+     
     st.markdown("#### A. Corrélation Température-Vitesse-Charge")
     st.write("Le transfert de charges électriques par frottement cinétique (effet triboélectrique) dépend directement de la vitesse spatiale du gaz. La dilatation thermique des gaz modifie le gain de transfert de charge $k(T)$, exprimé en picocoulombs par unité de concentration :")
     st.latex(r"k(T) = k_0 \cdot \sqrt{\frac{T_{gaz} + 273.15}{T_{ref} + 273.15}}")
@@ -198,11 +208,11 @@ with tab2:
     st.latex(r"Q_{raw}(t) = k(T) \cdot \Big[ C_{in}(t) \cdot \big(1 - \eta(t, T)\big)\Big] + \epsilon(t)")
     st.latex(r"\epsilon(t) \sim \mathcal{N}(0, \, \sigma_{sensor}^2)")
     st.write("Où $\sigma_{sensor} = 2.0 \text{ pC}$ représente le niveau de bruit de fond de la chaîne d'acquisition.")
-    
+     
     st.markdown("#### C. Équation de Filtrage de la Charge (Filtre Numérique)")
     st.write("Le lissage de la charge s'effectue par une moyenne mobile exponentielle récurrente :")
     st.latex(r"Q_{filtered}(t) = \alpha \cdot Q_{raw}(t) + (1 - \alpha) \cdot Q_{filtered}(t-1)")
-    
+     
     st.markdown("#### D. Algorithme d'Estimation du Rendement Industrielle")
     st.write("En mesurant la charge filtrée $Q_{filtered}(t)$, le système remonte au rendement estimé $\hat{\eta}(t)$ :")
     st.latex(r"\hat{C}_{out}(t) = \frac{Q_{filtered}(t)}{k(T)}")
