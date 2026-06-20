@@ -294,4 +294,29 @@ with tab2:
         "Sonde à Impact Classique": [
             "Choc mécanique direct et transfert de charge par friction locale.",
             "Très élevée. La poussière de ciment crée une couche isolante sur la tige.",
-            "Élevé. L'absence de blindage capte
+            "Élevé. L'absence de blindage capte les parasites des moteurs et variateurs.",
+            "Fréquente (Nécessite des nettoyages pneumatiques réguliers).",
+            "Décroissant. Le signal s'atténue à mesure que la sonde s'encrasse."
+        ],
+        "Votre Cage de Faraday (Écoulement)": [
+            "Théorème de Gauss. Induction électrostatique sans contact à travers un flux continu.",
+            "Nul. Aucun contact requis avec l'élément de mesure central.",
+            "Extrêmement faible. Le cylindre externe fait office de blindage à la masse.",
+            "Quasi inexistante (Géométrie coaxiale autonettoyante par le flux gazeux).",
+            "Constant et stable. Uniquement lié à la température et au débit."
+        ]
+    }
+    st.table(compa_data)
+
+    st.markdown("---")
+    st.subheader("🔬 Équations de Modélisation du Capteur Coaxial (Faraday)")
+     
+    st.markdown("#### A. Application du Théorème de Gauss")
+    st.write("Lorsqu'un nuage de particules portant une charge volumique intrinsèque $q_v(t)$ s'écoule au centre du cylindre de mesure interne, une charge électrique strictement opposée est induite à sa surface par influence totale :")
+    st.latex(r"Q_{induit}(t) = - \iiint_{v} q_v(t) \cdot dV")
+    st.write("Le cylindre coaxial externe est maintenu au potentiel zéro de la terre ($V_{exterieur} = 0\\text{ V}$), annulant le champ électrique externe d'origine parasite.")
+
+    st.markdown("#### B. Dynamique d'atténuation de la sonde d'impact")
+    st.write("À l'inverse, la perte d'efficacité de captation par impact due à l'accumulation de poussières de ciment suit une loi de dégradation exponentielle, paramétrée dans l'application :")
+    st.latex(r"k_{impact}(t) = k_{0, impact} \cdot \sqrt{\frac{T_{gaz} + 273.15}{293.15}} \cdot e^{-\lambda t}")
+    st.write("Où $\\lambda$ représente le coefficient d'encrassement. Cela explique pourquoi, sur vos graphiques, la courbe rouge s'effondre alors que votre courbe bleue (Faraday) reste stable et continue de surveiller fidèlement le rendement réel.")
