@@ -192,4 +192,137 @@ with tab1:
                 st.session_state.ema_faraday_state = (sim.alpha * r_faraday) + ((1.0 - sim.alpha) * st.session_state.ema_faraday_state)
              
             # --- CALCUL DES PARAMÈTRES ÉLECTRIQUES ---
-            v_real_faraday =
+            v_real_faraday = (st.session_state.ema_faraday_state * 1e-9) * sim.r_shunt
+            q_inst_pC = (sim.capacite_faraday * v_real_faraday) * 1e12
+            
+            # Estimation du rendement de filtrage
+            facteur_t = np.sqrt((gas_temp + 273.15) / 293.15)
+            i_max_theorique = ((sim.base_concentration * q_sec) / 1000.0) * (sim.k_tribo_base * facteur_t)
+            estimated_eff = 1.0 - (st.session_state.ema_faraday_state / i_max_theorique)
+            
+            # Enregistrement dans les banques de données de session
+            st.session_state.time_steps.append(t)
+            st.session_state.timestamps.append(now_str)  # Sauvegarde chronologique
+            st.session_state.raw_carcasse.append(r_carcasse)
+            st.session_state.filtered_carcasse.append(st.session_state.ema_carcasse_state)
+            st.session_state.raw_faraday.append(r_faraday)
+            st.session_state.filtered_faraday.append(st.session_state.ema_faraday_state)
+            st.session_state.voltage_faraday.append(v_real_faraday)
+            st.session_state.charge_acquise_pC.append(q_inst_pC)
+            st.session_state.efficiencies_calculated.append(estimated_eff * 100.0)
+             
+            # Fenêtre glissante limitée à 80 points pour le graphique dynamique
+            if len(st.session_state.time_steps) > 80:
+                st.session_state.time_steps.pop(0)
+                st.session_state.timestamps.pop(0)
+                st.session_state.raw_carcasse.pop(0)
+                st.session_state.filtered_carcasse.pop(0)
+                st.session_state.raw_faraday.pop(0)
+                st.session_state.filtered_faraday.pop(0)
+                st.session_state.voltage_faraday.pop(0)
+                st.session_state.charge_acquise_pC.pop(0)
+                st.session_state.efficiencies_calculated.pop(0)
+                 
+            # --- ARCHITECTURE DES GRAPHIQUES AVEC TIMESTAMPS SUR L'AXE X ---
+            fig = make_subplots(
+                rows=3, cols=1, 
+                shared_xaxes=True, 
+                vertical_spacing=0.09,
+                subplot_titles=(
+                    "📈 Évolution du Courant de Carcasse (Drainage de Masse Négatif)",
+                    "⚛️ Dynamique de la Charge Électrostatique Réelle Acquise (Q)", 
+                    "📊 Évolution du Rendement de Filtration Estimé (%)"
+                )
+            )
+            
+            # Utilisation des timestamps réels pour l'affichage graphique fluide
+            fig.add_trace(go.Scatter(x=list(st.session_state.timestamps), y=list(st.session_state.filtered_carcasse),
+                                     name="Courant Carcasse (Drainage -)", line=dict(color='#e67e22', width=2.5)), row=1, col=1)
+            
+            fig.add_trace(go.Scatter(x=list(st.session_state.timestamps), y=list(st.session_state.charge_acquise_pC),
+                                     name="Charge Induite (Q)", line=dict(color='#9b59b6', width=2.5)), row=2, col=1)
+            
+            fig.add_trace(go.Scatter(x=list(st.session_state.timestamps), y=list(st.session_state.efficiencies_calculated),
+                                     name="Rendement (%)", line=dict(color='#2ecc71', width=2)), row=3, col=1)
+            
+            fig.update_layout(height=780, margin=dict(l=30, r=30, t=40, b=10), showlegend=True)
+            fig.update_yaxes(title_text="Courant Carcasse (nA)", row=1, col=1)
+            fig.update_yaxes(title_text="Charge Q (pC)", row=2, col=1)
+            fig.update_yaxes(title_text="Rendement (%)", row=3, col=1)
+            fig.update_xaxes(title_text="Horodatage de Mesure (Heure:Min:Sec.ms)", row=3, col=1)
+            
+            # Rendu dynamique
+            with placeholder.container():
+                delta_verification = abs(abs(st.session_state.ema_carcasse_state) - st.session_state.ema_faraday_state)
+                
+                if t_damage:
+                    st.error(f"🚨 EXTRUSION THERMIQUE CRITIQUE : Température de {gas_temp}°C supérieure à la limite admissible des manches P84 (240°C).")
+                elif delta_verification > 5.0 and trigger_cem_noise:
+                    st.warning(f"⚡ PARASITES DE MASSE DÉTECTÉS (CEM) : Écart de {delta_verification:.2f} nA détecté sur la carcasse extérieure.")
+                elif estimated_eff < 0.992:
+                    st.error(f"📉 CHUTE DU RENDEMENT DE FILTRATION : Fuite détectée par le capteur. Rendement bas : {estimated_eff*100:.3f}%")
+                else:
+                    st.success(f"✅ SYSTEME EN LIGNE [{now_str}] : Comportement nominal et écoulement stable vers le puits de terre.")
+
+                # --- AFFICHAGE SYNOPTIQUE (4 COLONNES) ---
+                st.markdown("#### 🎛️ Indicateurs d'Acquisition de l'Interface")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric(
+                        label="🔏 Courant de Carcasse",
+                        value=f"{st.session_state.ema_carcasse_state:.2f} nA",
+                        delta="Drainage négatif (-)",
+                        delta_color="inverse"
+                    )
+                with col2:
+                    st.metric(
+                        label="⚛️ Charge Acquise (Q)",
+                        value=f"{q_inst_pC:.2f} pC",
+                        delta="Charge cumulée"
+                    )
+                with col3:
+                    st.metric(
+                        label="🔌 Tension du Shunt",
+                        value=f"{v_real_faraday:.3f} V",
+                        delta=f"Mesure sur {sim.r_shunt/1e6:.1f} MΩ"
+                    )
+                with col4:
+                    st.metric(
+                        label="📈 Rendement de Filtration",
+                        value=f"{estimated_eff * 100.0:.3f} %",
+                        delta=f"{m_fuite_sec*1000:.1f} mg/s de fuite",
+                        delta_color="inverse" if estimated_eff < 0.995 else "normal"
+                    )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+            st.session_state.current_step += 1
+            time.sleep(speed)
+    else:
+        st.info("⏸️ Système en attente d'acquisition. Activez le commutateur dans le volet latéral gauche pour lancer les captures.")
+
+# ===================================================
+# ONGLET 2 : RAPPELS THEORIQUES ET EQUATIONS
+# ===================================================
+with tab2:
+    st.header("Validation Électrotechnique du Capteur Cylindrique")
+    
+    st.markdown("### 📐 Équation de Dimensionnement Fondamentale")
+    st.write("La capacité géométrique d'une cage de Faraday coaxiale parfaite s'exprime par la relation de Gauss :")
+    st.latex(r"C_{\text{cage}} = \frac{2 \pi \cdot \varepsilon_0 \cdot \varepsilon_r \cdot L}{\ln\left(\frac{R_2}{R_1}\right)}")
+    
+    st.markdown(f"""
+    **Application de vos dimensions physiques réelles :**
+    * Longueur active du capteur ($L$) = **{sim.longueur_L:.2f} m** (soit 10 cm)
+    * Rayon interne de l'électrode active ($R_1$) = **{sim.diametre_int/2:.1f} mm** (Diamètre de 60 mm)
+    * Rayon externe de l'écran protecteur ($R_2$) = **{sim.diametre_ext/2:.1f} mm** (Diamètre de 80 mm)
+    * Permittivité absolue de l'air sec ($\varepsilon_0 \cdot \varepsilon_r$) = **$8,854 \times 10^{{-12}}$ F/m**
+    
+    Le calcul donne la valeur fixe implémentée dans votre programme : **{sim.capacite_faraday * 1e12:.2f} pF**.
+    """)
+    
+    st.markdown("---")
+    st.subheader("🔬 Déduction de la Charge Électrostatique Cumulée ($Q$)")
+    st.write("La charge instantanée acquise par influence électrostatique pure sur la paroi intérieure reste calculée de manière transparente à partir du Shunt d'adaptation :")
+    st.latex(r"Q_{\text{acquise}}(t) = C_{\text{cage}} \times V_{\text{shunt}}(t) = C_{\text{cage}} \times \left( I_{\text{Faraday}}(t) \times R_{\text{shunt}} \right)")
