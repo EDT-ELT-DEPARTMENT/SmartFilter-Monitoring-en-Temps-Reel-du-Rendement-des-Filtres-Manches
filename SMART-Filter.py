@@ -3,6 +3,8 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
+import pandas as pd
+import io
 
 # Configuration de la page
 st.set_page_config(
@@ -42,7 +44,6 @@ class CementFilterSimulation:
          
         # 4. Impact de la température sur la charge induite
         # La température dilate les gaz et augmente la vitesse des chocs particulaires sur la sonde.
-        # Plus l'impact est énergétique, plus la charge transférée par triboélectricité augmente.
         facteur_temperature = np.sqrt((temperature + 273.15) / 293.15)
         sensor_gain = self.k_zero * facteur_temperature
          
@@ -89,6 +90,9 @@ with tab1:
     if 'ema_state' not in st.session_state:
         st.session_state.ema_state = None
 
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🛠️ Actions & Export")
+
     if st.sidebar.button("Réinitialiser l'historique"):
         st.session_state.time_steps = []
         st.session_state.raw_charges = []
@@ -97,6 +101,33 @@ with tab1:
         st.session_state.current_step = 0
         st.session_state.ema_state = None
         st.rerun()
+
+    # --- BLOC D'EXPORTATION EXCEL DYNAMIQUE ---
+    if len(st.session_state.time_steps) > 0:
+        # Création du DataFrame avec toutes les courbes affichées
+        df_export = pd.DataFrame({
+            "Temps (Iterations)": list(st.session_state.time_steps),
+            "Charge Brute Induite (pC)": list(st.session_state.raw_charges),
+            "Charge Filtree EMA (pC)": list(st.session_state.filtered_charges),
+            "Rendement Estime (%)": list(st.session_state.efficiencies)
+        })
+        
+        # Écriture en mémoire du fichier Excel
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            df_export.to_excel(writer, index=False, sheet_name="Donnees_Capteur")
+        excel_buffer.seek(0)
+        
+        # Bouton de téléchargement
+        st.sidebar.download_button(
+            label="📥 Télécharger les courbes (.xlsx)",
+            data=excel_buffer,
+            file_name="donnees_electrostatic_smartfilter.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="excel_download"
+        )
+    else:
+        st.sidebar.caption("⏳ En attente de données pour l'export Excel...")
 
     placeholder = st.empty()
 
@@ -119,8 +150,7 @@ with tab1:
             estimated_c_out = st.session_state.ema_state / dynamic_gain
             estimated_eff = 1.0 - (estimated_c_out / sim.base_concentration)
             
-            # Calcul du débit massique réel rejeté (Masse = Concentration * Débit d'air)
-            # mg/m^3 * m^3/h = mg/h -> division par 1 000 000 pour obtenir des kg/h
+            # Calcul du débit massique réel rejeté
             flux_massique_kgh = (estimated_c_out * sim.debit_air_nominal) / 1000000.0
              
             # Stockage dans l'historique glissant
@@ -135,7 +165,7 @@ with tab1:
                 st.session_state.filtered_charges.pop(0)
                 st.session_state.efficiencies.pop(0)
                  
-            # Tracé dynamique Plotly (Unités mises à jour en pC)
+            # Tracé dynamique Plotly
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_charges),
                                      name="Charge Brute Induite (pC)", line=dict(color='rgba(160,160,160,0.4)', width=1)), row=1, col=1)
@@ -159,11 +189,10 @@ with tab1:
                 else:
                     st.success(f"✅ PROCÉDÉ SÉCURISÉ : Tissu P84 stable à {gas_temp}°C. Opération nominale.")
                 
-                # Section 2 : Les Afficheurs Numériques en Colonnes (KPIs)
+                # Section 2 : Les Afficheurs Numériques (KPIs)
                 st.markdown("### 🎛️ Indicateurs Numériques de Sortie")
                 m_col1, m_col2, m_col3 = st.columns(3)
                 
-                # Afficheur 1 : Le Rendement Global
                 m_col1.metric(
                     label="Rendement de Filtration",
                     value=f"{estimated_eff * 100.0:.3f} %",
@@ -171,7 +200,6 @@ with tab1:
                     delta_color="inverse"
                 )
                 
-                # Afficheur 2 : La Concentration Massique Volumique 
                 m_col2.metric(
                     label="Concentration Échappée",
                     value=f"{estimated_c_out:.2f} mg/m³",
@@ -179,7 +207,6 @@ with tab1:
                     delta_color="inverse"
                 )
                 
-                # Afficheur 3 : La Masse Totale Absolue Échappée par Heure
                 m_col3.metric(
                     label="Masse Totale Échappée",
                     value=f"{flux_massique_kgh:.2f} kg/h",
@@ -227,7 +254,6 @@ with tab2:
      
     st.markdown("---")
      
-    # Équations physiques révisées avec la variable de CHARGE Q(t)
     st.subheader("🔬 Couplage Thermo-Électrostatique (Équations de Modélisation)")
      
     st.markdown("#### A. Corrélation Température-Vitesse-Charge")
