@@ -303,4 +303,57 @@ with tab1:
                 c2.metric(
                     label="Courant d'Induction Cage (I_far)",
                     value=f"{st.session_state.ema_faraday_state:.2f} nA",
-                    delta=f"{q_faraday_p
+                    delta=f"{q_faraday_pC:.1f} pC (Charge Induite)"
+                )
+                
+                c3.metric(
+                    label="Tension de Sortie Intégrée",
+                    value=f"{v_real_faraday:.3f} V",
+                    delta="Blindage Coaxial Actif"
+                )
+                
+                c4.metric(
+                    label="Débit de Poussière Rejeté",
+                    value=f"{m_fuite_sec * 1000.0:.1f} mg/s",
+                    delta=f"$\Delta I$ masse = {delta_i:.2f} nA",
+                    delta_color="inverse" if delta_i > 2.0 else "normal"
+                )
+                
+                st.markdown("---")
+                st.plotly_chart(fig, use_container_width=True)
+                 
+            st.session_state.current_step += 1
+            time.sleep(speed)
+    else:
+        st.info("Système en pause. Activez le commutateur du volet latéral pour démarrer le monitoring exclusif de la cage de Faraday.")
+
+# ==========================================
+# ONGLET 2 : ÉQUATIONS ET LOGIQUE GÉOMÉTRIQUE
+# ==========================================
+with tab2:
+    st.header("Physique de l'Induction Sans Contact (Cage de Faraday Coaxiale)")
+    
+    st.markdown("### 📐 Géométrie Singulière du Prototype Coaxial")
+    st.markdown("""
+    La surveillance repose sur l'équivalence stricte entre le courant de fuite évacué par la trame métallique conductrice du filtre et le courant d'influence mesuré en aval. 
+    L'élimination des sondes à impact permet d'éviter l'encrassement physique lié aux particules à haute température.
+    
+    * **Longueur utile de détection ($L$) :** $10\\text{ cm} = 0,10\\text{ m}$
+    * **Rayon intérieur de l'électrode ($R_1$) :** $30\\text{ mm} = 0,03\\text{ m}$ (Passage libre total de $\\varnothing 60\\text{ mm}$)
+    * **Rayon extérieur de blindage ($R_2$) :** $40\\text{ mm} = 0,04\\text{ m}$ (Cylindre de garde externe de $\\varnothing 80\\text{ mm}$)
+    """)
+    
+    st.info("La capacité équivalente du capteur s'élève à **19,33 pF**, permettant une dynamique de conversion tension-charge hautement réactive.")
+
+    st.markdown("---")
+    st.subheader("🔬 Formulation des Phénomènes d'Influence Électrostatique")
+     
+    st.markdown("#### A. Traduction du Flux Massique en Intensité Courante")
+    st.write("Le nuage de ciment en rupture de manche cède ses charges négatives à la carcasse et transporte une charge positive nette. Le courant d'induction induit dans la cage est régi par :")
+    st.latex(r"I_{\text{Faraday}}(t) = \dot{m}_{\text{fuite}}(t) \cdot k_{\text{tribo}} \cdot \sqrt{\frac{T_{\text{gaz}} + 273.15}{293.15}}")
+    st.write("Où la masse particulaire $\\dot{m}_{\\text{fuite}}$ est calculée en fonction du débit d'extraction de la cimenterie d'Oggaz ($450\\,000\\text{ m}^3/\\text{h}$).")
+
+    st.markdown("#### B. Équation Fondamentale de la Tension de Sortie")
+    st.write("La tension instantanée mesurée par le circuit d'acquisition de la carte électronique est définie par la loi des condensateurs :")
+    st.latex(r"V_{\text{cage}}(t) = \frac{Q_{\text{induit}}(t)}{C_{\text{cage}}} = \frac{\int_{0}^{\Delta t} I_{\text{Faraday}}(t) \, dt}{19,33 \times 10^{-12}}")
+    st.write("Le blindage extérieur relié à la masse isole le cylindre interne de $60\\text{ mm}$, protégeant la mesure des variations brusques de potentiel que subit la carcasse de l'usine sous l'effet des hacheurs ou des moteurs de forte puissance.")
