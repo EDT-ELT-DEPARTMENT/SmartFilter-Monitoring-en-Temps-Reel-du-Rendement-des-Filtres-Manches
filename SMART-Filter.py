@@ -8,14 +8,14 @@ import io
 
 # Configuration complète de la page de l'application
 st.set_page_config(
-    page_title="SmartFilter Monitor - Version Corrigée",
+    page_title="SmartFilter Monitor - Filtrage Affichage",
     layout="wide"
 )
 
 # --- EN-TÊTE RÉGLEMENTAIRE ET RAPPEL DU TITRE EXIGÉ ---
 st.title("SmartFilter Monitor")
 st.subheader("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
-st.markdown("### ⚡ Analyseur Différentiel Haute Précision : Drainage, Induction et Charge Acquise")
+st.markdown("### ⚡ Analyseur Différentiel : Drainage de Carcasse, Charge Acquise et Rendement")
 
 # --- COEUR DE MODÉLISATION PHYSIQUE BILATERALE ---
 class CementFilterFaradaySimulation:
@@ -84,7 +84,6 @@ run_simulation = st.sidebar.toggle("Activer l'acquisition en direct", value=True
 st.sidebar.markdown("---")
 st.sidebar.subheader("📐 Spécifications Physiques du Capteur")
 
-# Utilisation d'une chaîne brute (fr) et de symboles clairs pour éliminer les bugs d'affichage
 st.sidebar.markdown(fr"""
 * **Longueur utile ($L$) :** {sim.longueur_L * 100:.1f} cm
 * **Diamètre Intérieur ($\varnothing_{{int}}$) :** {sim.diametre_int:.1f} mm
@@ -148,7 +147,7 @@ with tab1:
             else:
                 st.session_state.ema_carcasse_state = (sim.alpha * r_carcasse) + ((1.0 - sim.alpha) * st.session_state.ema_carcasse_state)
              
-            # Lissage numérique du courant positif de la cage de Faraday (EMA)
+            # Lissage numérique du courant de la cage de Faraday (Calcul interne uniquement)
             if st.session_state.ema_faraday_state is None:
                 st.session_state.ema_faraday_state = r_faraday
             else:
@@ -161,7 +160,7 @@ with tab1:
             # Charge instantanée acquise par induction : Q = C * V (exprimée en PicoCoulombs pC)
             q_inst_pC = (sim.capacite_faraday * v_real_faraday) * 1e12
             
-            # Estimation du rendement de filtrage en comparant le flux d'induction au flux théorique max
+            # Estimation du rendement de filtrage
             facteur_t = np.sqrt((gas_temp + 273.15) / 293.15)
             i_max_theorique = ((sim.base_concentration * q_sec) / 1000.0) * (sim.k_tribo_base * facteur_t)
             estimated_eff = 1.0 - (st.session_state.ema_faraday_state / i_max_theorique)
@@ -176,7 +175,7 @@ with tab1:
             st.session_state.charge_acquise_pC.append(q_inst_pC)
             st.session_state.efficiencies_calculated.append(estimated_eff * 100.0)
              
-            # Fenêtre glissante limitée à 80 points pour garder une lecture fluide
+            # Fenêtre glissante limitée à 80 points
             if len(st.session_state.time_steps) > 80:
                 st.session_state.time_steps.pop(0)
                 st.session_state.raw_carcasse.pop(0)
@@ -187,23 +186,21 @@ with tab1:
                 st.session_state.charge_acquise_pC.pop(0)
                 st.session_state.efficiencies_calculated.pop(0)
                  
-            # --- ARCHITECTURE DES GRAPHIQUES PLOTLY ---
+            # --- ARCHITECTURE DES GRAPHIQUES PLOTLY (SANS COURANT DE FARADAY) ---
             fig = make_subplots(
                 rows=3, cols=1, 
                 shared_xaxes=True, 
                 vertical_spacing=0.09,
                 subplot_titles=(
-                    "📈 Analyse Parallèle des Courants (Drainage de Carcasse vs Induction de Faraday)",
+                    "📈 Évolution du Courant de Carcasse (Drainage de Masse Négatif)",
                     "⚛️ Dynamique de la Charge Électrostatique Réelle Acquise (Q)", 
                     "📊 Évolution du Rendement de Filtration Estimé (%)"
                 )
             )
             
-            # Graphe 1 : Les deux courants opposés affichés simultanément
+            # Graphe 1 : Courant de Carcasse seul (Faraday supprimé)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_carcasse),
-                                     name="Courant Carcasse (Drainage -)", line=dict(color='#e67e22', width=2)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_faraday),
-                                     name="Courant Faraday (Induction +)", line=dict(color='#2980b9', width=2.5)), row=1, col=1)
+                                     name="Courant Carcasse (Drainage -)", line=dict(color='#e67e22', width=2.5)), row=1, col=1)
             
             # Graphe 2 : Charge acquise en pC
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.charge_acquise_pC),
@@ -214,7 +211,7 @@ with tab1:
                                      name="Rendement (%)", line=dict(color='#2ecc71', width=2)), row=3, col=1)
             
             fig.update_layout(height=780, margin=dict(l=30, r=30, t=40, b=10), showlegend=True)
-            fig.update_yaxes(title_text="Courants (nA)", row=1, col=1)
+            fig.update_yaxes(title_text="Courant Carcasse (nA)", row=1, col=1)
             fig.update_yaxes(title_text="Charge Q (pC)", row=2, col=1)
             fig.update_yaxes(title_text="Rendement (%)", row=3, col=1)
             fig.update_xaxes(title_text="Temps (Échantillons)", row=3, col=1)
@@ -226,15 +223,15 @@ with tab1:
                 if t_damage:
                     st.error(f"🚨 EXTRUSION THERMIQUE CRITIQUE : Température de {gas_temp}°C supérieure à la limite admissible des manches P84 (240°C).")
                 elif delta_verification > 5.0 and trigger_cem_noise:
-                    st.warning(f"⚡ PARASITES DE MASSE DÉTECTÉS (CEM) : Écart de {delta_verification:.2f} nA. La carcasse subit les bruits moteurs, mais la cage de Faraday reste immunisée et stable.")
+                    st.warning(f"⚡ PARASITES DE MASSE DÉTECTÉS (CEM) : Écart de {delta_verification:.2f} nA entre la masse instable et l'induction isolée.")
                 elif estimated_eff < 0.992:
-                    st.error(f"📉 CHUTE DU RENDEMENT DE FILTRATION : Fuite détectée sur le flux d'induction positif. Rendement bas : {estimated_eff*100:.3f}%")
+                    st.error(f"📉 CHUTE DU RENDEMENT DE FILTRATION : Fuite détectée par l'étage de mesure. Rendement bas : {estimated_eff*100:.3f}%")
                 else:
-                    st.success("✅ ÉQUILIBRE ÉLECTROSTATIQUE RECONNU : Parfaite symétrie entre les charges évacuées (carcasse) et induites (Faraday).")
+                    st.success("✅ ÉQUILIBRE ÉLECTROSTATIQUE RECONNU : Comportement nominal et drainage stable vers la terre.")
 
-                # --- AFFICHAGE SYNOPTIQUE CLAIR DES PARAMÈTRES (5 COLONNES) ---
+                # --- AFFICHAGE SYNOPTIQUE MODIFIÉ (4 COLONNES - FARADAY SUPPRIMÉ) ---
                 st.markdown("#### 🎛️ Indicateurs d'Acquisition de l'Interface")
-                col1, col2, col3, col4, col5 = st.columns(5)
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
                     st.metric(
@@ -245,23 +242,17 @@ with tab1:
                     )
                 with col2:
                     st.metric(
-                        label="🌐 Courant de Faraday",
-                        value=f"{st.session_state.ema_faraday_state:.2f} nA",
-                        delta="Induction positive (+)"
-                    )
-                with col3:
-                    st.metric(
                         label="⚛️ Charge Acquise (Q)",
                         value=f"{q_inst_pC:.2f} pC",
-                        delta="Charge cumulée"
+                        delta="Charge cumulée inductrice"
                     )
-                with col4:
+                with col3:
                     st.metric(
                         label="🔌 Tension du Shunt",
                         value=f"{v_real_faraday:.3f} V",
                         delta=f"Mesure sur {sim.r_shunt/1e6:.1f} MΩ"
                     )
-                with col5:
+                with col4:
                     st.metric(
                         label="📈 Rendement de Filtration",
                         value=f"{estimated_eff * 100.0:.3f} %",
@@ -298,7 +289,5 @@ with tab2:
     
     st.markdown("---")
     st.subheader("🔬 Déduction de la Charge Électrostatique Cumulée ($Q$)")
-    st.write("La charge instantanée acquise par influence électrostatique pure sur la paroi intérieure est liée à la tension mesurée par l'équation :")
-    st.latex(r"Q_{\text{acquise}}(t) = C_{\text{cage}} \times V_{\text{shunt}}(t)")
-    st.write("En remplaçant la tension par le produit du courant d'induction et de la résistance de conditionnement, on obtient la valeur directe affichée sur le tableau de bord :")
-    st.latex(r"Q_{\text{acquise}}(t) = C_{\text{cage}} \times \left( I_{\text{Faraday}}(t) \times R_{\text{shunt}} \right)")
+    st.write("La charge instantanée acquise par influence électrostatique pure sur la paroi intérieure reste calculée de manière transparente à partir du Shunt d'adaptation :")
+    st.latex(r"Q_{\text{acquise}}(t) = C_{\text{cage}} \times V_{\text{shunt}}(t) = C_{\text{cage}} \times \left( I_{\text{Faraday}}(t) \times R_{\text{shunt}} \right)")
