@@ -297,6 +297,71 @@ with tab2:
 # ===================================================
 # ONGLET 3 : DISPOSITIF EXPÉRIMENTAL & INSTRUMENTATION
 # ===================================================
+# ===================================================
+# ONGLET 3 : DISPOSITIF EXPÉRIMENTAL & INSTRUMENTATION
+# ===================================================
+with tab3:
+    st.header("📐 Architecture du Dispositif Expérimental")
+    
+    st.markdown("""
+    Cette section détaille la configuration physique et l'interconnexion de l'installation pilote 
+    associant le **filtre à manches** industriel et le **capteur d'induction à cage de Faraday**.
+    """)
+    
+    st.subheader("📸 Synoptique Réel de l'Installation")
+    
+    # Intégration de votre schéma SVG dynamique
+    svg_dispositif = """
+    <svg width="100%" height="300" viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100%" height="100%" fill="#fcfcfc" rx="10" stroke="#dcdde1" stroke-width="1"/>
+      <path d="M 40 150 L 300 150" stroke="#7f8c8d" stroke-width="50" fill="none" opacity="0.25"/>
+      <path d="M 40 150 L 260 150" stroke="#e67e22" stroke-width="8" stroke-dasharray="10 5" fill="none"/>
+      <polygon points="265,150 255,145 255,155" fill="#e67e22"/>
+      <rect x="300" y="70" width="80" height="160" fill="#dcdde1" stroke="#2c3e50" stroke-width="3" rx="4"/>
+      <line x1="300" y1="70" x2="380" y2="230" stroke="#7f8c8d" stroke-width="1.5"/>
+      <line x1="300" y1="230" x2="380" y2="70" stroke="#7f8c8d" stroke-width="1.5"/>
+      <text x="315" y="155" font-family="Arial" font-size="12" fill="#2c3e50" font-weight="bold">Manche</text>
+      <text x="325" y="175" font-family="Arial" font-size="12" fill="#2c3e50" font-weight="bold">P84</text>
+      <line x1="340" y1="230" x2="340" y2="260" stroke="#c0392b" stroke-width="2.5"/>
+      <line x1="325" y1="260" x2="355" y2="260" stroke="#2c3e50" stroke-width="3"/>
+      <line x1="330" y1="265" x2="350" y2="265" stroke="#2c3e50" stroke-width="2"/>
+      <line x1="335" y1="270" x2="345" y2="270" stroke="#2c3e50" stroke-width="1"/>
+      <path d="M 380 150 L 520 150" stroke="#7f8c8d" stroke-width="35" fill="none" opacity="0.2"/>
+      <circle cx="420" cy="145" r="3" fill="#e67e22"/>
+      <circle cx="450" cy="155" r="4" fill="#e67e22"/>
+      <circle cx="480" cy="148" r="3" fill="#e67e22"/>
+      <rect x="520" y="75" width="220" height="150" fill="none" stroke="#2c3e50" stroke-width="2"/>
+      <rect x="550" y="100" width="160" height="100" fill="none" stroke="#2980b9" stroke-width="3" stroke-dasharray="6 4"/>
+      <line x1="630" y1="200" x2="630" y2="240" stroke="#2980b9" stroke-width="2"/>
+      <rect x="610" y="240" width="40" height="25" fill="#f5f6fa" stroke="#2c3e50" stroke-width="2"/>
+      <text x="620" y="257" font-family="Arial" font-size="12" font-weight="bold" fill="#2c3e50">R_sh</text>
+      <line x1="630" y1="265" x2="630" y2="280" stroke="#2c3e50" stroke-width="2"/>
+      <text x="50" y="115" font-family="Arial" font-size="12" fill="#e67e22" font-weight="bold">Flux amont chargé (+/-)</text>
+      <text x="250" y="45" font-family="Arial" font-size="13" fill="#2c3e50" font-weight="bold">1. Évacuation Triboélectrique</text>
+      <text x="365" y="275" font-family="Arial" font-size="11" fill="#c0392b" font-weight="bold">Courant Carcasse (I_carcasse)</text>
+      <text x="560" y="45" font-family="Arial" font-size="13" fill="#2980b9" font-weight="bold">2. Capteur à Influence Électrostatique</text>
+      <text x="560" y="125" font-family="Arial" font-size="11" fill="#2980b9">Électrode active (Ø 60mm)</text>
+      <text x="560" y="215" font-family="Arial" font-size="11" fill="#2c3e50">Blindage de garde (Ø 80mm)</text>
+      <text x="665" y="257" font-family="Arial" font-size="11" fill="#2c3e50" font-weight="bold">Shunt 2.5 MΩ</text>
+    </svg>
+    """
+    components.html(svg_dispositif, height=310)
+    
+    st.divider()
+    
+    st.subheader("💻 Chaîne d'Acquisition et Connectivité IoT")
+    st.markdown("Pour assurer la supervision, le signal analogique est traité comme suit :")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.write("### 1. Conditionnement")
+        st.info("Amplificateur de charge & Filtrage")
+    with col2:
+        st.write("### 2. Acquisition (PC)")
+        st.success("Module DAQ 16-bit")
+    with col3:
+        st.write("### 3. Couche IoT")
+        st.warning("Passerelle MQTT / Modbus")
 with tab3:
     st.header("📐 Architecture du Dispositif Expérimental")
     st.markdown("""
@@ -305,7 +370,6 @@ with tab3:
     
     st.subheader("📸 Synoptique Réel de l'Installation")
     
-    # Intégration d'un schéma structurel vectoriel dynamique pour remplacer l'image manquante
     svg_dispositif = """
     <svg width="100%" height="300" viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
       <rect width="100%" height="100%" fill="#fcfcfc" rx="10" stroke="#dcdde1" stroke-width="1"/>
