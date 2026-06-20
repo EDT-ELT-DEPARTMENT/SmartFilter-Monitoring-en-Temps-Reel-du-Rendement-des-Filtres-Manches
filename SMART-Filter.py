@@ -16,7 +16,7 @@ st.set_page_config(
 
 # --- EN-TÊTE RÉGLEMENTAIRE ET RAPPEL DU TITRE EXIGÉ ---
 st.title("SmartFilter Monitor")
-st.subheader("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
+st.subheader("Plateforme de monitoring d'un filtre à manches-Cas d'une cimenterie ")
 st.markdown("### ⚡ Analyseur Différentiel : Relevés Électrostatiques Temporels & Spécifications")
 
 # --- COEUR DE MODÉLISATION PHYSIQUE BILATERALE ---
