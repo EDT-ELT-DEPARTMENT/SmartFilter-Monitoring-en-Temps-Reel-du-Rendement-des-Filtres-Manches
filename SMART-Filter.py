@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 # En-tête officiel de l'application
-st.title("Supervision en temps réel et diagnostic électrostatique du rendement de filtration")
+st.title("Plateforme de supervision en temps réel et diagnostic électrostatique du rendement de filtration")
 st.subheader("Module de Supervision : Monitoring Intelligent du Filtre à Manches")
 
 # --- MODÉLISATION DU SYSTÈME PHYSIQUE ---
