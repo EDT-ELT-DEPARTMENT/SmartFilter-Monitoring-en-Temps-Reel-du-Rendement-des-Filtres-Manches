@@ -5,17 +5,18 @@ from plotly.subplots import make_subplots
 import time
 import pandas as pd
 import io
+import datetime
 
 # Configuration complète de la page de l'application
 st.set_page_config(
-    page_title="SmartFilter Monitor - Export Excel",
+    page_title="SmartFilter Monitor - Export Temporel",
     layout="wide"
 )
 
 # --- EN-TÊTE RÉGLEMENTAIRE ET RAPPEL DU TITRE EXIGÉ ---
 st.title("SmartFilter Monitor")
 st.subheader("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
-st.markdown("### ⚡ Analyseur Différentiel : Drainage de Carcasse, Charge Acquise et Rendement")
+st.markdown("### ⚡ Analyseur Différentiel : Relevés Électrostatiques Temporels & Export Excel")
 
 # --- COEUR DE MODÉLISATION PHYSIQUE BILATERALE ---
 class CementFilterFaradaySimulation:
@@ -77,9 +78,11 @@ class CementFilterFaradaySimulation:
 # Instanciation du modèle de simulation
 sim = CementFilterFaradaySimulation()
 
-# --- INITIALISATION REQUIRÉE DES ÉTATS DE SESSION STREAMLIT ---
+# --- INITIALISATION DES ÉTATS DE SESSION STREAMLIT ---
 if 'time_steps' not in st.session_state:
     st.session_state.time_steps = []
+if 'timestamps' not in st.session_state:
+    st.session_state.timestamps = []  # Nouvelle banque de données pour stocker le temps réel
 if 'raw_carcasse' not in st.session_state:
     st.session_state.raw_carcasse = []
 if 'filtered_carcasse' not in st.session_state:
@@ -124,14 +127,14 @@ trigger_mechanical = st.sidebar.toggle("Simuler une déchirure de manche", value
 trigger_cem_noise = st.sidebar.toggle("Injecter des parasites CEM (Masse)", value=True)
 speed = st.sidebar.slider("Intervalle d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
-# --- BLOC COMPLET D'EXPORTATION EN FICHIER EXCEL (.XLSX) ---
+# --- BLOC D'EXPORTATION EN FICHIER EXCEL (.XLSX) CALIBRÉ SUR LE TEMPS ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("💾 Exportation des Données")
 
-if len(st.session_state.time_steps) > 0:
-    # Structuration des vecteurs de données dans un dictionnaire ordonné
+if len(st.session_state.timestamps) > 0:
+    # Intégration de l'horodatage réel au lieu des simples index numériques
     data_dictionnaire = {
-        "Index Échantillon": list(st.session_state.time_steps),
+        "Horodatage (Temps Réel)": list(st.session_state.timestamps),
         "Courant de Carcasse Filtré (nA)": list(st.session_state.filtered_carcasse),
         "Tension mesurée au Shunt (V)": list(st.session_state.voltage_faraday),
         "Charge Électrostatique Acquise (pC)": list(st.session_state.charge_acquise_pC),
@@ -140,21 +143,21 @@ if len(st.session_state.time_steps) > 0:
     
     df_export = pd.DataFrame(data_dictionnaire)
     
-    # Écriture binaire en mémoire tampon via IO et Pandas ExcelWriter
+    # Écriture binaire en mémoire tampon via IO
     output_buffer = io.BytesIO()
     with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-        df_export.to_excel(writer, index=False, sheet_name='Données_Filtration_EDT')
+        df_export.to_excel(writer, index=False, sheet_name='Données_Temporelles_EDT')
     
     processed_data = output_buffer.getvalue()
     
     st.sidebar.download_button(
-        label="📥 Télécharger la table Excel",
+        label="📥 Télécharger la table Excel (Série Temporelle)",
         data=processed_data,
-        file_name="Donnees_Cage_Faraday_EDT_2026.xlsx",
+        file_name="Chronologie_Cage_Faraday_EDT_2026.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
-    st.sidebar.info("En attente de relevés physiques pour compiler le tableur Excel.")
+    st.sidebar.info("En attente de relevés temporels pour compiler le tableur Excel.")
 
 # Configuration des onglets de visualisation
 tab1, tab2 = st.tabs(["📊 Tableau de Bord Temps Réel", "🔬 Rappels Théoriques & Formules"])
@@ -163,12 +166,15 @@ tab1, tab2 = st.tabs(["📊 Tableau de Bord Temps Réel", "🔬 Rappels Théoriq
 # ONGLET 1 : AFFICHAGE DU TABLEAU DE BORD TEMPS RÉEL
 # ===================================================
 with tab1:
-    # Conteneur dynamique unique pour rafraîchir l'affichage sans scintillement
     placeholder = st.empty()
 
     if run_simulation:
         while True:
             t = st.session_state.current_step
+            
+            # Capturer l'instant exact avec millisecondes pour un suivi haute précision
+            now_str = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            
             r_carcasse, r_faraday, true_eff, t_damage, q_sec, m_fuite_sec = sim.generate_data_point(
                 t, trigger_mechanical, gas_temp, trigger_cem_noise
             )
@@ -179,147 +185,11 @@ with tab1:
             else:
                 st.session_state.ema_carcasse_state = (sim.alpha * r_carcasse) + ((1.0 - sim.alpha) * st.session_state.ema_carcasse_state)
              
-            # Lissage numérique du courant de la cage de Faraday (Calcul interne uniquement, masqué du UI)
+            # Lissage numérique du courant de la cage de Faraday (Calcul interne masqué)
             if st.session_state.ema_faraday_state is None:
                 st.session_state.ema_faraday_state = r_faraday
             else:
                 st.session_state.ema_faraday_state = (sim.alpha * r_faraday) + ((1.0 - sim.alpha) * st.session_state.ema_faraday_state)
              
-            # --- CALCUL DES PARAMÈTRES ÉLECTRIQUES CORRIGÉS ---
-            # Tension mesurée aux bornes du Shunt (V = I * R)
-            v_real_faraday = (st.session_state.ema_faraday_state * 1e-9) * sim.r_shunt
-            
-            # Charge instantanée acquise par induction : Q = C * V (exprimée en PicoCoulombs pC)
-            q_inst_pC = (sim.capacite_faraday * v_real_faraday) * 1e12
-            
-            # Estimation du rendement de filtrage
-            facteur_t = np.sqrt((gas_temp + 273.15) / 293.15)
-            i_max_theorique = ((sim.base_concentration * q_sec) / 1000.0) * (sim.k_tribo_base * facteur_t)
-            estimated_eff = 1.0 - (st.session_state.ema_faraday_state / i_max_theorique)
-            
-            # Remplissage des tableaux de l'historique glissant
-            st.session_state.time_steps.append(t)
-            st.session_state.raw_carcasse.append(r_carcasse)
-            st.session_state.filtered_carcasse.append(st.session_state.ema_carcasse_state)
-            st.session_state.raw_faraday.append(r_faraday)
-            st.session_state.filtered_faraday.append(st.session_state.ema_faraday_state)
-            st.session_state.voltage_faraday.append(v_real_faraday)
-            st.session_state.charge_acquise_pC.append(q_inst_pC)
-            st.session_state.efficiencies_calculated.append(estimated_eff * 100.0)
-             
-            # Fenêtre glissante limitée à 80 points
-            if len(st.session_state.time_steps) > 80:
-                st.session_state.time_steps.pop(0)
-                st.session_state.raw_carcasse.pop(0)
-                st.session_state.filtered_carcasse.pop(0)
-                st.session_state.raw_faraday.pop(0)
-                st.session_state.filtered_faraday.pop(0)
-                st.session_state.voltage_faraday.pop(0)
-                st.session_state.charge_acquise_pC.pop(0)
-                st.session_state.efficiencies_calculated.pop(0)
-                 
-            # --- ARCHITECTURE DES GRAPHIQUES PLOTLY (SANS COURANT DE FARADAY) ---
-            fig = make_subplots(
-                rows=3, cols=1, 
-                shared_xaxes=True, 
-                vertical_spacing=0.09,
-                subplot_titles=(
-                    "📈 Évolution du Courant de Carcasse (Drainage de Masse Négatif)",
-                    "⚛️ Dynamique de la Charge Électrostatique Réelle Acquise (Q)", 
-                    "📊 Évolution du Rendement de Filtration Estimé (%)"
-                )
-            )
-            
-            # Graphe 1 : Courant de Carcasse seul (Faraday supprimé de la légende et du tracé)
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_carcasse),
-                                     name="Courant Carcasse (Drainage -)", line=dict(color='#e67e22', width=2.5)), row=1, col=1)
-            
-            # Graphe 2 : Charge acquise en pC
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.charge_acquise_pC),
-                                     name="Charge Induite (Q)", line=dict(color='#9b59b6', width=2.5)), row=2, col=1)
-            
-            # Graphe 3 : Rendement global calculé
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.efficiencies_calculated),
-                                     name="Rendement (%)", line=dict(color='#2ecc71', width=2)), row=3, col=1)
-            
-            fig.update_layout(height=780, margin=dict(l=30, r=30, t=40, b=10), showlegend=True)
-            fig.update_yaxes(title_text="Courant Carcasse (nA)", row=1, col=1)
-            fig.update_yaxes(title_text="Charge Q (pC)", row=2, col=1)
-            fig.update_yaxes(title_text="Rendement (%)", row=3, col=1)
-            fig.update_xaxes(title_text="Temps (Échantillons)", row=3, col=1)
-            
-            # Rendu en temps réel dans le bloc principal
-            with placeholder.container():
-                delta_verification = abs(abs(st.session_state.ema_carcasse_state) - st.session_state.ema_faraday_state)
-                
-                if t_damage:
-                    st.error(f"🚨 EXTRUSION THERMIQUE CRITIQUE : Température de {gas_temp}°C supérieure à la limite admissible des manches P84 (240°C).")
-                elif delta_verification > 5.0 and trigger_cem_noise:
-                    st.warning(f"⚡ PARASITES DE MASSE DÉTECTÉS (CEM) : Écart de {delta_verification:.2f} nA détecté sur le circuit de masse externe.")
-                elif estimated_eff < 0.992:
-                    st.error(f"📉 CHUTE DU RENDEMENT DE FILTRATION : Fuite détectée par l'étage de mesure. Rendement bas : {estimated_eff*100:.3f}%")
-                else:
-                    st.success("✅ ÉQUILIBRE ÉLECTROSTATIQUE RECONNU : Comportement nominal et drainage stable vers la terre.")
-
-                # --- AFFICHAGE SYNOPTIQUE MODIFIÉ (4 COLONNES - FARADAY SUPPRIMÉ) ---
-                st.markdown("#### 🎛️ Indicateurs d'Acquisition de l'Interface")
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric(
-                        label="🔏 Courant de Carcasse",
-                        value=f"{st.session_state.ema_carcasse_state:.2f} nA",
-                        delta="Drainage négatif (-)",
-                        delta_color="inverse"
-                    )
-                with col2:
-                    st.metric(
-                        label="⚛️ Charge Acquise (Q)",
-                        value=f"{q_inst_pC:.2f} pC",
-                        delta="Charge cumulée"
-                    )
-                with col3:
-                    st.metric(
-                        label="🔌 Tension du Shunt",
-                        value=f"{v_real_faraday:.3f} V",
-                        delta=f"Mesure sur {sim.r_shunt/1e6:.1f} MΩ"
-                    )
-                with col4:
-                    st.metric(
-                        label="📈 Rendement de Filtration",
-                        value=f"{estimated_eff * 100.0:.3f} %",
-                        delta=f"{m_fuite_sec*1000:.1f} mg/s de fuite",
-                        delta_color="inverse" if estimated_eff < 0.995 else "normal"
-                    )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-            st.session_state.current_step += 1
-            time.sleep(speed)
-    else:
-        st.info("⏸️ Système en attente d'acquisition. Activez le commutateur dans le volet latéral gauche pour lancer les captures.")
-
-# ===================================================
-# ONGLET 2 : RAPPELS THEORIQUES ET EQUATIONS MATRICIELLES
-# ===================================================
-with tab2:
-    st.header("Validation Électrotechnique du Capteur Cylindrique")
-    
-    st.markdown("### 📐 Équation de Dimensionnement Fondamentale")
-    st.write("La capacité géométrique d'une cage de Faraday coaxiale parfaite s'exprime par la relation de Gauss :")
-    st.latex(r"C_{\text{cage}} = \frac{2 \pi \cdot \varepsilon_0 \cdot \varepsilon_r \cdot L}{\ln\left(\frac{R_2}{R_1}\right)}")
-    
-    st.markdown(f"""
-    **Application de vos dimensions physiques réelles :**
-    * Longueur active du capteur ($L$) = **{sim.longueur_L:.2f} m** (soit 10 cm)
-    * Rayon interne de l'électrode active ($R_1$) = **{sim.diametre_int/2:.1f} mm** (Diamètre de 60 mm)
-    * Rayon externe de l'écran protecteur ($R_2$) = **{sim.diametre_ext/2:.1f} mm** (Diamètre de 80 mm)
-    * Permittivité absolue de l'air sec ($\varepsilon_0 \cdot \varepsilon_r$) = **$8,854 \times 10^{{-12}}$ F/m**
-    
-    Le calcul donne la valeur fixe implémentée dans votre programme : **{sim.capacite_faraday * 1e12:.2f} pF**.
-    """)
-    
-    st.markdown("---")
-    st.subheader("🔬 Déduction de la Charge Électrostatique Cumulée ($Q$)")
-    st.write("La charge instantanée acquise par influence électrostatique pure sur la paroi intérieure reste calculée de manière transparente à partir du Shunt d'adaptation :")
-    st.latex(r"Q_{\text{acquise}}(t) = C_{\text{cage}} \times V_{\text{shunt}}(t) = C_{\text{cage}} \times \left( I_{\text{Faraday}}(t) \times R_{\text{shunt}} \right)")
+            # --- CALCUL DES PARAMÈTRES ÉLECTRIQUES ---
+            v_real_faraday =
