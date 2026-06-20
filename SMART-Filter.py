@@ -43,9 +43,9 @@ class CementFilterFaradaySimulation:
     def generate_data_point(self, t, is_mechanically_damaged, temperature, cem_parasite_active):
         q_sec = self.debit_air_nominal / 3600.0 # Débit en m3/s (125 m3/s)
         
-        # Défaillances
-        thermal_damage = temperature > self.t_critique_tissu
-        if is_mechanically_damaged or thermal_damage:
+        # Correction du bug de variable ici : thermal_damage devient t_damage
+        t_damage = temperature > self.t_critique_tissu
+        if is_mechanically_damaged or t_damage: 
             current_eff = 0.978  
         else:
             current_eff = self.nominal_efficiency
@@ -188,8 +188,10 @@ with tab1:
             with placeholder.container():
                 # Diagnostics d'États
                 delta_verification = abs(abs(st.session_state.ema_carcasse_state) - st.session_state.ema_faraday_state)
-                if delta_verification > 5.0 and trigger_cem_noise:
-                    st.warning(f"⚡ ALERTE DISCORDANCE DE POLARITÉ : Écart de masse de {delta_verification:.2f} nA détecté. Des parasites induits perturbent le réseau de terre de la carcasse, mais la cage de Faraday reste stable.")
+                if t_damage:
+                    st.error(f"🚨 EXTRUSION THERMIQUE CRITIQUE : Gaz à {gas_temp}°C > Seuil de rupture des mailles P84 (240°C).")
+                elif delta_verification > 5.0 and trigger_cem_noise:
+                    st.warning(f"⚡ ALERTE DISCORDANCE DE POLARITÉ : Écart de masse de {delta_verification:.2f} nA détecté. Des parasites induits perturbent la masse de la carcasse, mais la cage de Faraday reste isolée et stable.")
                 elif estimated_eff < 0.992:
                     st.error(f"📉 FUITE CONFIRMÉE : Hausse corrélée sur le flux d'induction positif. Rendement bas : {estimated_eff*100:.3f}%")
                 else:
