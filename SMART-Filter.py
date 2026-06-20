@@ -304,10 +304,9 @@ with tab3:
     
     st.subheader("📸 Synoptique Réel de l'Installation")
     
-    # Message d'aide pour l'utilisateur
     st.info("💡 **Note d'intégration :** Pour lier votre propre schéma graphique local, déposez votre fichier image (ex: `schema_pilote.png`) dans le répertoire de l'application et utilisez la commande `st.image('schema_pilote.png', caption='...')`.")
     
-    # Dessin structurel/Maquette simulée en HTML/CSS pour l'affichage de la figure
+    # Dessin structurel en HTML/CSS sans erreur d'accolades f-string
     st.markdown("""
     <div style="border: 2px dashed #3498db; padding: 25px; border-radius: 12px; text-align: center; background-color: #f8f9fa; margin-bottom: 25px;">
         <h4 style="color: #2980b9; margin-top: 0; font-family: Arial;">[ REPRÉSENTATION DU BANQUET D'ESSAIS EXPÉRIMENTAL ]</h4>
@@ -326,7 +325,6 @@ with tab3:
     </div>
     """, unsafe_allow_html=True)
     
-    # Division en deux colonnes pour l'affichage de toutes les informations utiles
     info_col1, info_col2 = st.columns(2)
     
     with info_col1:
@@ -341,10 +339,11 @@ with tab3:
         
     with info_col2:
         st.markdown("### 🔌 Instrumentation & Cage de Faraday Coaxiale")
+        # Correction des accolades doubles {{ }} sur \text{{ cm}} et \text{{ mm}} pour éviter le NameError
         st.markdown(f"""
         * **Architecture du Capteur :** Double cylindre coaxial en alliage d'aluminium à géométrie fixe.
-        * **Géométrie de l'électrode utile :** Longueur active $L = {sim.longueur_L*100:.1f}\text{ cm}$ | Diamètre intérieur $\varnothing = {sim.diametre_int:.0f}\text{ mm}$.
-        * **Écran de Blindage externe :** Diamètre $\varnothing = {sim.diametre_ext:.0f}\text{ mm}$ raccordé à la masse électronique isolée pour éliminer toute influence électromagnétique ambiante (moteurs, commutateurs industriels).
+        * **Géométrie de l'électrode utile :** Longueur active $L = {sim.longueur_L*100:.1f}\text{{ cm}}$ | Diamètre intérieur $\varnothing = {sim.diametre_int:.0f}\text{{ mm}}$.
+        * **Écran de Blindage externe :** Diamètre $\varnothing = {sim.diametre_ext:.0f}\text{{ mm}}$ raccordé à la masse électronique isolée pour éliminer toute influence électromagnétique ambiante (moteurs, commutateurs industriels).
         * **Étage d'adaptation analogique :**
             * Résistance de Shunt ultra-stable : `{sim.r_shunt/1e6:.1f} M\Omega`
             * Rôle : Convertisseur Courant-Tension direct ($V = I \cdot R$) permettant de numériser les nano-ampères induits sans saturer l'étage microcontrôleur.
