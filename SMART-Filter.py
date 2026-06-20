@@ -6,12 +6,12 @@ import time
 
 # Configuration de la page et rappel des spécifications de la plateforme
 st.set_page_config(
-    page_title="Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA",
+    page_title="Plateforme de Supervision en temps réel et diagnostic électrostatique du rendement de filtration",
     layout="wide"
 )
 
 # En-tête officiel de l'application
-st.title("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
+st.title("Supervision en temps réel et diagnostic électrostatique du rendement de filtration")
 st.subheader("Module de Supervision : Monitoring Intelligent du Filtre à Manches")
 
 # --- MODÉLISATION DU SYSTÈME PHYSIQUE ---
