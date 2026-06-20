@@ -133,7 +133,7 @@ st.sidebar.markdown(fr"""
 st.sidebar.markdown("---")
 st.sidebar.subheader("Contrôle du Procédé")
 gas_temp = st.sidebar.slider("Température des Gaz (°C)", 120, 280, 200)
-trigger_mechanical = st.sidebar.toggle("Simuler une déchirure de manche", value=False)
+trigger_mechanical = st.sidebar.toggle("Simuler une perforation du manche", value=False)
 trigger_cem_noise = st.sidebar.toggle("Injecter des parasites CEM (Masse)", value=True)
 speed = st.sidebar.slider("Intervalle d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
