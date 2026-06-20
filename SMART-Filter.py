@@ -27,7 +27,7 @@ st.set_page_config(
 # --- EN-TÊTE RÉGLEMENTAIRE ET RAPPEL DU TITRE EXIGÉ ---
 st.title("SmartFilter Monitor")
 st.subheader("Plateforme de monitoring d'un filtre à manches-Cas d'une cimenterie ")
-st.markdown("### ⚡ Analyseur Différentiel : Relevés Électrostatiques Temporels & Spécifications")
+st.markdown("### ⚡ Supervision avancée du rendement des filtres à manches.")
 
 # --- COEUR DE MODÉLISATION PHYSIQUE BILATERALE ---
 class CementFilterFaradaySimulation:
