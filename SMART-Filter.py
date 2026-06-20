@@ -20,12 +20,14 @@ st.markdown("**Supervision Haute Température & Diagnostic Électrostatique - Ap
 # --- COEUR DE MODÉLISATION PHYSIQUE AVEC CAPACITÉ RÉELLE ---
 class CementFilterAdvancedSimulation:
     def __init__(self):
-        # Paramètres procédé généraux
-        self.base_concentration = 1200.0  # mg/m^3 (Charge brute du four)
-        self.nominal_efficiency = 0.9995  # 99.95% (Opération nominale)
-        self.t_critique_tissu = 240.0     # Limite du Polyimide P84 (°C)
-        self.debit_air_nominal = 100000.0 # m^3/h
+        # Paramètres procédé mis à jour pour Lafarge Oggaz (Sig)
+        self.base_concentration = 1200.0  # mg/m^3
+        self.nominal_efficiency = 0.9995  # 99.95%
+        self.t_critique_tissu = 240.0     # °C
+        self.debit_air_nominal = 450000.0 # <--- MODIFIÉ : Passage de 100 000 à 450 000 m^3/h
 
+        # Votre cage réelle (Longueur 10cm, D_ext 80mm, D_int 60mm)
+        self.capacite_faraday = 19.33e-12 # 19.33 pF
         # --- INTÉGRATION DE VOS DIMENSIONS ET CAPACITÉ RÉELLE ---
         # L = 10 cm, D_ext = 80 mm, D_int = 60 mm -> C = 19.33 pF
         self.capacite_faraday = 19.33e-12 # 19.33 Picofarads (en Farads)
