@@ -12,11 +12,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# En-tête principal épuré
+# En-tête principal de la plateforme
 st.title("SmartFilter Monitor")
-st.subheader("Supervision Haute Température & Diagnostic Électrostatique - Application Cimenterie")
+st.subheader("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
+st.markdown("**Supervision Haute Température & Diagnostic Électrostatique - Application Cimenterie**")
 
-# --- COEUR DE MODÉLISATION PHYSIQUE DES DEUX TECHNOLOGIES ---
+# --- COEUR DE MODÉLISATION PHYSIQUE AVEC CAPACITÉ RÉELLE ---
 class CementFilterAdvancedSimulation:
     def __init__(self):
         # Paramètres procédé généraux
@@ -25,13 +26,17 @@ class CementFilterAdvancedSimulation:
         self.t_critique_tissu = 240.0     # Limite du Polyimide P84 (°C)
         self.debit_air_nominal = 100000.0 # m^3/h
 
+        # --- INTÉGRATION DE VOS DIMENSIONS ET CAPACITÉ RÉELLE ---
+        # L = 10 cm, D_ext = 80 mm, D_int = 60 mm -> C = 19.33 pF
+        self.capacite_faraday = 19.33e-12 # 19.33 Picofarads (en Farads)
+        
         # Paramètres spécifiques : Capteur 1 (Sonde à Impact classique)
         self.k_impact_zero = 4.0          # Gain initial par impact
         self.noise_impact = 6.5           # Bruit fort (Pas de blindage Faraday)
         
         # Paramètres spécifiques : Capteur 2 (Votre Cage de Faraday coaxiale)
         self.k_faraday_zero = 5.0         # Gain initial par induction
-        self.noise_faraday = 1.2          # Bruit très faible (Blindage par cylindre externe)
+        self.noise_faraday = 1.2          # Bruit très faible (pC) grâce au cylindre externe de 80mm
 
         self.alpha = 0.15                 # Coefficient du filtre EMA
 
@@ -60,6 +65,7 @@ class CementFilterAdvancedSimulation:
         raw_impact = max(0.0, (c_out * gain_impact) + np.random.normal(0.0, self.noise_impact))
 
         # --- CAPTEUR 2 : CAGE DE FARADAY (ÉCOULEMENT) ---
+        # Pas d'encrassement (Diamètre de passage intérieur libre de 60mm)
         gain_faraday = self.k_faraday_zero * facteur_temperature
         raw_faraday = max(0.0, (c_out * gain_faraday) + np.random.normal(0.0, self.noise_faraday))
          
@@ -85,7 +91,7 @@ with tab1:
     trigger_fouling = st.sidebar.toggle("Activer l'encrassement (Sonde Impact)", value=True)
     speed = st.sidebar.slider("Fréquence d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
-    # --- INITIALISATION INDÉPENDANTE DE CHAQUE VARIABLE ---
+    # --- INITIALISATION INDÉPENDANTE ET VÉRIFICATION DE SESSIONS ---
     if 'time_steps' not in st.session_state:
         st.session_state.time_steps = []
     if 'raw_impact' not in st.session_state:
@@ -96,6 +102,8 @@ with tab1:
         st.session_state.raw_faraday = []
     if 'filtered_faraday' not in st.session_state:
         st.session_state.filtered_faraday = []
+    if 'voltage_faraday' not in st.session_state:
+        st.session_state.voltage_faraday = []
     if 'efficiencies_faraday' not in st.session_state:
         st.session_state.efficiencies_faraday = []
     if 'current_step' not in st.session_state:
@@ -114,43 +122,45 @@ with tab1:
         st.session_state.filtered_impact = []
         st.session_state.raw_faraday = []
         st.session_state.filtered_faraday = []
+        st.session_state.voltage_faraday = []
         st.session_state.efficiencies_faraday = []
         st.session_state.current_step = 0
         st.session_state.ema_impact_state = None
         st.session_state.ema_faraday_state = None
         st.rerun()
 
-    # --- CORRECTION ET SÉCURISATION DU BLOC D'EXPORTATION EXCEL ---
+    # --- SÉCURISATION DU BLOC D'EXPORTATION EXCEL ---
     lengths = [
         len(st.session_state.time_steps),
         len(st.session_state.raw_impact),
         len(st.session_state.filtered_impact),
         len(st.session_state.raw_faraday),
         len(st.session_state.filtered_faraday),
+        len(st.session_state.voltage_faraday),
         len(st.session_state.efficiencies_faraday)
     ]
     min_len = min(lengths) if lengths else 0
 
     if min_len > 0:
-        # Création sécurisée avec indexation synchronisée à min_len
         df_export = pd.DataFrame({
             "Temps (Iterations)": list(st.session_state.time_steps)[:min_len],
             "Sonde Impact - Brute (pC)": list(st.session_state.raw_impact)[:min_len],
             "Sonde Impact - Filtree EMA (pC)": list(st.session_state.filtered_impact)[:min_len],
             "Cage Faraday - Brute (pC)": list(st.session_state.raw_faraday)[:min_len],
             "Cage Faraday - Filtree EMA (pC)": list(st.session_state.filtered_faraday)[:min_len],
+            "Cage Faraday - Tension Calculee (V)": list(st.session_state.voltage_faraday)[:min_len],
             "Rendement Estime par Cage Faraday (%)": list(st.session_state.efficiencies_faraday)[:min_len]
         })
         
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            df_export.to_excel(writer, index=False, sheet_name="Comparatif_Capteurs")
+            df_export.to_excel(writer, index=False, sheet_name="Faraday_19.33pF_Data")
         excel_buffer.seek(0)
         
         st.sidebar.download_button(
-            label="📥 Télécharger l'étude comparative (.xlsx)",
+            label="📥 Télécharger les données de la cage (.xlsx)",
             data=excel_buffer,
-            file_name="comparatif_impact_vs_faraday.xlsx",
+            file_name="monitoring_faraday_19_33pF.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="excel_download"
         )
@@ -178,21 +188,24 @@ with tab1:
             else:
                 st.session_state.ema_faraday_state = (sim.alpha * r_faraday) + ((1.0 - sim.alpha) * st.session_state.ema_faraday_state)
              
+            # --- CONVERSION EN TENSION RÉELLE VIA LA CAPACITÉ (V = Q / C) ---
+            # Q est en picocoulombs (10^-12 C) et C est en picofarads (19.33 * 10^-12 F)
+            # Les 10^-12 s'annulent, donc V = Q_pC / C_pF
+            v_real_faraday = st.session_state.ema_faraday_state / 19.33
+             
             # Inversion mathématique thermodynamique pour estimer le rendement via votre Cage de Faraday
             facteur_t = np.sqrt((gas_temp + 273.15) / 293.15)
             dynamic_gain_faraday = sim.k_faraday_zero * facteur_t
             estimated_c_out_faraday = st.session_state.ema_faraday_state / dynamic_gain_faraday
             estimated_eff_faraday = 1.0 - (estimated_c_out_faraday / sim.base_concentration)
             
-            # Débit massique absolu (kg/h)
-            flux_massique_kgh = (estimated_c_out_faraday * sim.debit_air_nominal) / 1000000.0
-             
             # Remplissage des buffers historiques (limités aux 100 dernières itérations)
             st.session_state.time_steps.append(t)
             st.session_state.raw_impact.append(r_impact)
             st.session_state.filtered_impact.append(st.session_state.ema_impact_state)
             st.session_state.raw_faraday.append(r_faraday)
             st.session_state.filtered_faraday.append(st.session_state.ema_faraday_state)
+            st.session_state.voltage_faraday.append(v_real_faraday)
             st.session_state.efficiencies_faraday.append(estimated_eff_faraday * 100.0)
              
             if len(st.session_state.time_steps) > 100:
@@ -201,13 +214,14 @@ with tab1:
                 st.session_state.filtered_impact.pop(0)
                 st.session_state.raw_faraday.pop(0)
                 st.session_state.filtered_faraday.pop(0)
+                st.session_state.voltage_faraday.pop(0)
                 st.session_state.efficiencies_faraday.pop(0)
                  
             # --- CONFIGURATION DU TRACÉ DES GRAPHES COMPARATIFS ---
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
                                 subplot_titles=("Sonde Triboélectrique par Impact Classique (Non blindée)", 
-                                                "Votre Capteur Coaxial à Écoulement (Cage de Faraday Blindée)", 
-                                                "Rendement Calculé par la Cage de Faraday (%)"))
+                                                "Votre Cage de Faraday Coaxiale (Signaux en Charge pC & Tension V)", 
+                                                "Rendement de Filtration Estimé par la Cage de Faraday (%)"))
             
             # Graphe 1 : Sonde classique à Impact
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_impact),
@@ -215,25 +229,27 @@ with tab1:
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_impact),
                                      name="Impact : Filtrée (EMA)", line=dict(color='#db4455', width=2)), row=1, col=1)
             
-            # Graphe 2 : Votre Cage de Faraday
+            # Graphe 2 : Votre Cage de Faraday (Double axe ou affichage de la tension lissée)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_faraday),
-                                     name="Faraday : Brute", line=dict(color='rgba(31, 119, 180, 0.3)', width=1)), row=2, col=1)
+                                     name="Faraday : Brute (pC)", line=dict(color='rgba(31, 119, 180, 0.2)', width=1)), row=2, col=1)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_faraday),
-                                     name="Faraday : Filtrée (EMA)", line=dict(color='#1f77b4', width=2.5)), row=2, col=1)
+                                     name="Faraday : Filtrée (pC)", line=dict(color='#1f77b4', width=2)), row=2, col=1)
+            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.voltage_faraday),
+                                     name="Faraday : Tension (V)", line=dict(color='#9467bd', width=2, dash='dot')), row=2, col=1)
             
             # Graphe 3 : Rendement déduit par la technique stable (Faraday)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.efficiencies_faraday),
                                      name="Rendement Faraday", line=dict(color='#2ca02c', width=2.5)), row=3, col=1)
             fig.add_hline(y=99.2, line_dash="dash", line_color="orange", annotation_text="Seuil Alarme (99.2%)", row=3, col=1)
              
-            fig.update_layout(height=700, showlegend=True, margin=dict(l=20, r=20, t=30, b=10))
+            fig.update_layout(height=750, showlegend=True, margin=dict(l=20, r=20, t=30, b=10))
             fig.update_yaxes(title_text="Signal (pC)", row=1, col=1)
-            fig.update_yaxes(title_text="Signal (pC)", row=2, col=1)
+            fig.update_yaxes(title_text="Charge (pC) / Tension (V)", row=2, col=1)
             fig.update_yaxes(title_text="Rendement (%)", row=3, col=1)
             fig.update_xaxes(title_text="Temps (Itérations)", row=3, col=1)
              
             with placeholder.container():
-                # Alarmes de sécurité
+                # Alarmes de sécurité procédé
                 if t_damage:
                     st.error(f"🚨 STRATIFICATION THERMIQUE CRITIQUE : Gaz à {gas_temp}°C > Seuil P84 (240°C). Rupture physique imminente.")
                 elif estimated_eff_faraday < 0.992:
@@ -241,28 +257,31 @@ with tab1:
                 else:
                     st.success(f"✅ STATUT FILTRE NOMINAL : Écoulement stable à {gas_temp}°C à travers la maille.")
                 
-                # SECTION AFFICHEURS COMPARES
-                st.markdown("### 🎛️ Métriques Comparatives des Deux Technologies")
-                c1, c2, c3 = st.columns(3)
+                # SECTION DES AFFICHEURS NUMÉRIQUES
+                st.markdown("### 🎛️ Métriques d'Instrumentation de la Cage Réelle (C = 19.33 pF)")
+                c1, c2, c3, c4 = st.columns(4)
                 
                 c1.metric(
-                    label="Rendement Réel (Calculé via Faraday)",
-                    value=f"{estimated_eff_faraday * 100.0:.3f} %",
-                    delta=f"-{(0.9995 - estimated_eff_faraday)*100:.3f} %" if estimated_eff_faraday < 0.9995 else None,
-                    delta_color="inverse"
+                    label="Rendement de Filtration",
+                    value=f"{estimated_eff_faraday * 100.0:.3f} %"
                 )
                 
                 c2.metric(
-                    label="Signal Cage de Faraday (Stable)",
-                    value=f"{st.session_state.ema_faraday_state:.2f} pC",
-                    delta="Immunisé encrassement"
+                    label="Charge Filtrée EMA (Q)",
+                    value=f"{st.session_state.ema_faraday_state:.2f} pC"
                 )
                 
                 c3.metric(
-                    label="Signal Sonde Impact (Perte d'efficacité)",
-                    value=f"{st.session_state.ema_impact_state:.2f} pC",
-                    delta=f"Efficacité Capteur: {f_impact_ratio*100:.1f}%",
-                    delta_color="normal" if f_impact_ratio > 0.8 else "inverse"
+                    label="Tension de Sortie Estimée (V)",
+                    value=f"{v_real_faraday:.3f} V",
+                    delta="Calculé sur C = 19.33 pF"
+                )
+                
+                c4.metric(
+                    label="Dégradation Sonde Impact",
+                    value=f"{f_impact_ratio*100:.1f} %",
+                    delta="Perte de gain par dépôt" if trigger_fouling else "Stable",
+                    delta_color="inverse" if trigger_fouling else "normal"
                 )
                 
                 st.markdown("---")
@@ -277,46 +296,29 @@ with tab1:
 # ONGLET 2 : FICHE TECHNIQUE TISSU & ÉQUATIONS
 # ==========================================
 with tab2:
-    st.header("Étude Comparative de la Captation Électrostatique")
+    st.header("Étude Comparative & Caractéristiques Géométriques")
     
-    st.markdown("### 📊 Analyse Comparative : Impact Triboélectrique vs Induction Coaxiale")
+    st.markdown("### 📐 Propriétés Dimensionnelles de votre Prototype")
     
-    # Tableau comparatif direct des technologies
-    st.markdown("#### Tableau Synoptique Industriel")
-    compa_data = {
-        "Critère d'évaluation": [
-            "Physique fondamentale",
-            "Sensibilité à l'encrassement",
-            "Niveau de bruit de fond (EMI)",
-            "Niveau de maintenance requis",
-            "Évolution temporelle du gain"
-        ],
-        "Sonde à Impact Classique": [
-            "Choc mécanique direct et transfert de charge par friction locale.",
-            "Très élevée. La poussière de ciment crée une couche isolante sur la tige.",
-            "Élevé. L'absence de blindage capte les parasites des moteurs et variateurs.",
-            "Fréquente (Nécessite des nettoyages pneumatiques réguliers).",
-            "Décroissant. Le signal s'atténue à mesure que la sonde s'encrasse."
-        ],
-        "Votre Cage de Faraday (Écoulement)": [
-            "Théorème de Gauss. Induction électrostatique sans contact à travers un flux continu.",
-            "Nul. Aucun contact requis avec l'élément de mesure central.",
-            "Extrêmement faible. Le cylindre externe fait office de blindage à la masse.",
-            "Quasi inexistante (Géométrie coaxiale autonettoyante par le flux gazeux).",
-            "Constant et stable. Uniquement lié à la température et au débit."
-        ]
-    }
-    st.table(compa_data)
+    # Présentation claire des caractéristiques physiques calculées
+    st.markdown("""
+    Le calcul de la capacité propre repose sur les paramètres réels fournis pour la configuration coaxiale :
+    * **Longueur utile ($L$) :** $10\\text{ cm} = 0,10\\text{ m}$
+    * **Diamètre du cylindre intérieur (Électrode de mesure) :** $60\\text{ mm} \\rightarrow R_1 = 30\\text{ mm} = 0,03\\text{ m}$
+    * **Diamètre du cylindre extérieur (Écran de blindage) :** $80\\text{ mm} \\rightarrow R_2 = 40\\text{ mm} = 0,04\\text{ m}$
+    """)
+    
+    st.info("La capacité théorique calculée pour cette géométrie est de **19,33 pF**.")
 
     st.markdown("---")
-    st.subheader("🔬 Équations de Modélisation du Capteur Coaxial (Faraday)")
+    st.subheader("🔬 Équations Électrostatiques Fondamentales Appliquées")
      
-    st.markdown("#### A. Application du Théorème de Gauss")
-    st.write("Lorsqu'un nuage de particules portant une charge volumique intrinsèque $q_v(t)$ s'écoule au centre du cylindre de mesure interne, une charge électrique strictement opposée est induite à sa surface par influence totale :")
-    st.latex(r"Q_{induit}(t) = - \iiint_{v} q_v(t) \cdot dV")
-    st.write("Le cylindre coaxial externe est maintenu au potentiel zéro de la terre ($V_{exterieur} = 0\\text{ V}$), annulant le champ électrique externe d'origine parasite.")
+    st.markdown("#### A. Intégration de la Capacité dans le Système d'Acquisition")
+    st.write("La relation fondamentale reliant la tension mesurée ($V$) à la charge d'influence induite ($Q$) est exprimée par :")
+    st.latex(r"V(t) = \frac{Q_{EMA}(t)}{C_{cage}} = \frac{Q_{EMA}(t)}{19,33 \times 10^{-12}}")
+    st.write("Puisque la capacité $C$ est très petite ($< 20\\text{ pF}$), l'impulsion de tension induite par le passage des poussières de ciment possède une amplitude exploitable sans nécessiter un étage d'amplification de gain démesuré.")
 
-    st.markdown("#### B. Dynamique d'atténuation de la sonde d'impact")
-    st.write("À l'inverse, la perte d'efficacité de captation par impact due à l'accumulation de poussières de ciment suit une loi de dégradation exponentielle, paramétrée dans l'application :")
-    st.latex(r"k_{impact}(t) = k_{0, impact} \cdot \sqrt{\frac{T_{gaz} + 273.15}{293.15}} \cdot e^{-\lambda t}")
-    st.write("Où $\\lambda$ représente le coefficient d'encrassement. Cela explique pourquoi, sur vos graphiques, la courbe rouge s'effondre alors que votre courbe bleue (Faraday) reste stable et continue de surveiller fidèlement le rendement réel.")
+    st.markdown("#### B. Structure Mathématique de la Cage de Faraday")
+    st.write("La capacité d'un condensateur cylindrique coaxial se calcule via :")
+    st.latex(r"C = \frac{2 \pi \cdot \varepsilon_0 \cdot L}{\ln\left(\frac{R_2}{R_1}\right)}")
+    st.write("L'absence d'éléments solides entre le cylindre intérieur de 60mm et l'écoulement garantit l'immunité totale contre l'encrassement par rapport aux sondes à impact.")
