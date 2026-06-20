@@ -23,6 +23,7 @@ class CementFilterSimulation:
         self.k_zero = 5.0                 # Sensibilité de base du capteur en pC/(mg/m^3)
         self.alpha = 0.15                 # Coefficient du filtre lisseur EMA
         self.t_critique_tissu = 240.0     # Limite thermique du Polyimide P84 (°C)
+        self.debit_air_nominal = 100000.0 # m^3/h (Débit typique d'un compartiment de filtre)
 
     def generate_data_point(self, t, is_mechanically_damaged, temperature):
         # 1. Calcul de la dégradation (Mécanique ou Thermique si T > T_critique)
@@ -69,7 +70,7 @@ with tab1:
     trigger_mechanical = st.sidebar.toggle("Simuler une déchirure mécanique", value=False)
     speed = st.sidebar.slider("Fréquence d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
-    # --- CORRECTION DE L'INITIALISATION VARIABLE PAR VARIABLE ---
+    # --- INITIALISATION INDÉPENDANTE DE CHAQUE VARIABLE ---
     if 'time_steps' not in st.session_state:
         st.session_state.time_steps = []
         
@@ -117,6 +118,10 @@ with tab1:
             # Inversion mathématique : conversion Charge (pC) -> Concentration -> Rendement
             estimated_c_out = st.session_state.ema_state / dynamic_gain
             estimated_eff = 1.0 - (estimated_c_out / sim.base_concentration)
+            
+            # Calcul du débit massique réel rejeté (Masse = Concentration * Débit d'air)
+            # mg/m^3 * m^3/h = mg/h -> division par 1 000 000 pour obtenir des kg/h
+            flux_massique_kgh = (estimated_c_out * sim.debit_air_nominal) / 1000000.0
              
             # Stockage dans l'historique glissant
             st.session_state.time_steps.append(t)
@@ -140,19 +145,50 @@ with tab1:
                                      name="Rendement Estimé (%)", line=dict(color='#2ca02c', width=2.5)), row=2, col=1)
             fig.add_hline(y=99.2, line_dash="dash", line_color="red", annotation_text="Seuil Alarme (99.2%)", row=2, col=1)
              
-            fig.update_layout(height=550, showlegend=True, margin=dict(l=20, r=20, t=10, b=10))
+            fig.update_layout(height=500, showlegend=True, margin=dict(l=20, r=20, t=10, b=10))
             fig.update_yaxes(title_text="Charge Électrostatique (pC)", row=1, col=1)
             fig.update_yaxes(title_text="Rendement (%)", row=2, col=1)
             fig.update_xaxes(title_text="Temps (Itérations)", row=2, col=1)
              
             with placeholder.container():
+                # Section 1 : Messages d'alertes
                 if t_damage:
                     st.error(f"🚨 ALARME THERMIQUE : Gaz à {gas_temp}°C > Limite du tissu Polyimide P84 (240°C) ! Destruction thermique des manches en cours.")
                 elif estimated_eff < 0.992:
-                    st.warning(f"⚠️ ANOMALIE DE FILTRATION : Fuite détectée (Rupture ou usure mécanique). Rendement : {estimated_eff*100:.3f}%")
+                    st.warning(f"⚠️ ANOMALIE DE FILTRATION : Fuite détectée (Rupture ou usure mécanique).")
                 else:
-                    st.success(f"✅ PROCÉDÉ SÉCURISÉ : Tissu P84 stable à {gas_temp}°C. Filtration nominale : {estimated_eff*100:.3f}%")
+                    st.success(f"✅ PROCÉDÉ SÉCURISÉ : Tissu P84 stable à {gas_temp}°C. Opération nominale.")
+                
+                # Section 2 : Les Afficheurs Numériques en Colonnes (KPIs)
+                st.markdown("### 🎛️ Indicateurs Numériques de Sortie")
+                m_col1, m_col2, m_col3 = st.columns(3)
+                
+                # Afficheur 1 : Le Rendement Global
+                m_col1.metric(
+                    label="Rendement de Filtration",
+                    value=f"{estimated_eff * 100.0:.3f} %",
+                    delta=f"-{(0.9995 - estimated_eff)*100:.3f} %" if estimated_eff < 0.9995 else None,
+                    delta_color="inverse"
+                )
+                
+                # Afficheur 2 : La Concentration Massique Volumique 
+                m_col2.metric(
+                    label="Concentration Échappée",
+                    value=f"{estimated_c_out:.2f} mg/m³",
+                    delta=f"+{estimated_c_out - 0.60:.2f} mg/m³" if estimated_c_out > 1.0 else None,
+                    delta_color="inverse"
+                )
+                
+                # Afficheur 3 : La Masse Totale Absolue Échappée par Heure
+                m_col3.metric(
+                    label="Masse Totale Échappée",
+                    value=f"{flux_massique_kgh:.2f} kg/h",
+                    delta=f"+{flux_massique_kgh - 0.06:.2f} kg/h" if flux_massique_kgh > 0.1 else None,
+                    delta_color="inverse"
+                )
                  
+                st.markdown("---")
+                # Section 3 : Graphiques
                 st.plotly_chart(fig, use_container_width=True)
                  
             st.session_state.current_step += 1
