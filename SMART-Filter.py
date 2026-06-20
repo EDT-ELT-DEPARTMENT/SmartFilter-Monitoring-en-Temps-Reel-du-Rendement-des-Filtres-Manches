@@ -8,93 +8,89 @@ import io
 
 # Configuration de la page
 st.set_page_config(
-    page_title="SmartFilter Monitor - Cage de Faraday Unique",
+    page_title="SmartFilter Monitor - Dualité Électrostatique",
     layout="wide"
 )
 
 # En-tête réglementaire de la plateforme
 st.title("SmartFilter Monitor")
 st.subheader("Plateforme de gestion des EDTs-S2-2026-Département d'Électrotechnique-Faculté de génie électrique-UDL-SBA")
-st.markdown("**Supervision Électrostatique Exclusive par Cage de Faraday Coaxiale et Courant de Carcasse**")
+st.markdown("### ⚡ Analyseur Différentiel Charge de Carcasse (Masse) vs Induction (Faraday)")
 
-# --- COEUR DE MODÉLISATION PHYSIQUE EXCLUSIVE ---
+# --- COEUR DE MODÉLISATION PHYSIQUE BILATERALE ---
 class CementFilterFaradaySimulation:
     def __init__(self):
         # Paramètres procédé - Cimenterie de Lafarge Oggaz
         self.base_concentration = 1200.0  # mg/m^3 (Concentration amont nominale)
-        self.nominal_efficiency = 0.9995  # 99.95% de rendement de filtration nominal
-        self.t_critique_tissu = 240.0     # °C (Seuil thermique des manches P84)
+        self.nominal_efficiency = 0.9995  # 99.95% de rendement nominal
+        self.t_critique_tissu = 240.0     # °C (Seuil thermique P84)
         self.debit_air_nominal = 450000.0 # m^3/h
 
         # Constante triboélectrique intrinsèque du couple Ciment / P84
         self.k_tribo_base = 17684.0       # nC/g (Charge à saturation)
         
-        # Caractéristiques réelles de votre cage de Faraday (L=10cm, D_ext=80mm, D_int=60mm)
-        self.capacite_faraday = 19.33e-12 # Farads (19.33 pF)
+        # Caractéristiques de l'étage de mesure
+        self.capacite_faraday = 19.33e-12 # 19.33 pF
+        self.r_shunt = 2.5e6              # 2.5 MOhms (Conditionnement d'amplitude)
         
-        # Bruits de mesure et environnement électromagnétique (CEM)
-        self.noise_faraday_nA = 0.12      # Bruit ultra-faible grâce au blindage externe de 80mm
-        self.noise_carcasse_base = 0.4    # Bruit résiduel de masse
-        self.noise_carcasse_cem = 8.8     # Parasites massifs induits par les variateurs moteurs (VFD)
+        # Profils de bruit distincts (La carcasse subit la pollution CEM de l'usine)
+        self.noise_carcasse_base = 0.5    # Bruit thermique de masse
+        self.noise_carcasse_cem = 9.5     # Forts parasites VFD moteurs sur la masse de la carcasse
+        self.noise_faraday_nA = 0.12      # Cage de Faraday blindée immunisée
 
-        self.alpha = 0.15                 # Coefficient du filtre numérique EMA
+        self.alpha = 0.15                 # Filtre EMA
 
     def generate_data_point(self, t, is_mechanically_damaged, temperature, cem_parasite_active):
-        # 1. Calcul du débit d'air instantané en m3/s
-        q_sec = self.debit_air_nominal / 3600.0 # 125 m3/s
+        q_sec = self.debit_air_nominal / 3600.0 # Débit en m3/s (125 m3/s)
         
-        # 2. Modélisation des défaillances des manches (thermique ou mécanique)
+        # Défaillances
         thermal_damage = temperature > self.t_critique_tissu
         if is_mechanically_damaged or thermal_damage:
-            current_eff = 0.978  # Chute du rendement à 97.8% en cas de fuite ou déchirure
+            current_eff = 0.978  
         else:
             current_eff = self.nominal_efficiency
          
-        # 3. Évolution des concentrations de poussière
         c_in = max(0.0, np.random.normal(self.base_concentration, 40.0))
         c_out = c_in * (1.0 - current_eff)
-        
-        # 4. Débit massique particulaire résiduel (en g/s)
-        masse_fuite_sec = (c_out * q_sec) / 1000.0
+        masse_fuite_sec = (c_out * q_sec) / 1000.0  # Fuite particulaire en g/s
          
-        # 5. Calcul du coefficient thermique de transfert de charge
+        # Triboélectricité en fonction de la température
         facteur_temperature = np.sqrt((temperature + 273.15) / 293.15)
         charge_specifique = self.k_tribo_base * facteur_temperature
         
-        # 6. Déduction du courant théorique induit (I = dQ/dt)
-        # Masse (g/s) * Charge (nC/g) = Courant en nA
-        i_fuite_theorique = masse_fuite_sec * charge_specifique
+        # Courant absolu généré par la séparation de charge
+        i_généré_abs = masse_fuite_sec * charge_specifique
 
-        # --- SIGNAL DE CARCASSE (Drainage des électrons négatifs via les fils conducteurs) ---
-        bruit_carcasse = self.noise_carcasse_cem if cem_parasite_active else self.noise_carcasse_base
-        raw_carcasse = max(0.0, i_fuite_theorique + np.random.normal(0.0, bruit_carcasse))
+        # DUALITÉ PHYSIQUE :
+        # 1. Carcasse = Drainage des électrons excédentaires (charges négatives accumulées)
+        bruit_c = self.noise_carcasse_cem if cem_parasite_active else self.noise_carcasse_base
+        raw_carcasse_neg = - (i_généré_abs + np.random.normal(0.0, bruit_c))
 
-        # --- SIGNAL DE LA CAGE DE FARADAY (Induction des charges positives en cheminée) ---
-        raw_faraday = max(0.0, i_fuite_theorique + np.random.normal(0.0, self.noise_faraday_nA))
+        # 2. Cage de Faraday = Induction sans contact du flux de poussière positive
+        raw_faraday_pos = (i_généré_abs + np.random.normal(0.0, self.noise_faraday_nA))
          
-        return raw_carcasse, raw_faraday, current_eff, thermal_damage, q_sec, masse_fuite_sec
+        return raw_carcasse_neg, raw_faraday_pos, current_eff, t_damage, q_sec, masse_fuite_sec
 
-# Instanciation
 sim = CementFilterFaradaySimulation()
 
-# --- ONGLETS RESTRUCTURÉS ---
-tab1, tab2 = st.tabs(["📊 Diagnostic Électrostatique Cage", "🔬 Équations Fondamentales"])
+# Navigation par onglets
+tab1, tab2 = st.tabs(["📊 Suivi Simultané des Deux Paramètres", "🔬 Schéma du Bilan Électrique"])
 
 # ==========================================
-# ONGLET 1 : SUPERVISION EXCLUSIVE DU PROCÉDÉ
+# ONGLET 1 : AFFICHAGE SIMULTANÉ DES PARAMÈTRES
 # ==========================================
 with tab1:
     st.sidebar.header("Paramètres Opérationnels")
-    run_simulation = st.sidebar.toggle("Démarrer la supervision", value=True)
+    run_simulation = st.sidebar.toggle("Activer les acquisitions", value=True)
      
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Contrôle du Flux Cimenterie")
-    gas_temp = st.sidebar.slider("Température des fumées (°C)", 120, 280, 210)
-    trigger_mechanical = st.sidebar.toggle("Simuler une déchirure physique", value=False)
-    trigger_cem_noise = st.sidebar.toggle("Injecter parasites CEM (Variateurs)", value=True)
-    speed = st.sidebar.slider("Cadence d'acquisition (s)", 0.1, 1.0, 0.3)
+    st.sidebar.subheader("Contrôle du Procédé")
+    gas_temp = st.sidebar.slider("Température Processus (°C)", 120, 280, 200)
+    trigger_mechanical = st.sidebar.toggle("Générer déchirure de manche", value=False)
+    trigger_cem_noise = st.sidebar.toggle("Activer couplage CEM sur masse", value=True)
+    speed = st.sidebar.slider("Période d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
-    # --- SESSIONS TEMPORELLES ET EXTRACTION ---
+    # Initialisation des états de session
     if 'time_steps' not in st.session_state:
         st.session_state.time_steps = []
     if 'raw_carcasse' not in st.session_state:
@@ -105,83 +101,16 @@ with tab1:
         st.session_state.raw_faraday = []
     if 'filtered_faraday' not in st.session_state:
         st.session_state.filtered_faraday = []
-    if 'charge_faraday_pC' not in st.session_state:
-        st.session_state.charge_faraday_pC = []
     if 'voltage_faraday' not in st.session_state:
         st.session_state.voltage_faraday = []
-    if 'delta_i_differential' not in st.session_state:
-        st.session_state.delta_i_differential = []
     if 'efficiencies_calculated' not in st.session_state:
         st.session_state.efficiencies_calculated = []
-    if 'instantaneous_mass_flow' not in st.session_state:
-        st.session_state.instantaneous_mass_flow = []
     if 'current_step' not in st.session_state:
         st.session_state.current_step = 0
     if 'ema_carcasse_state' not in st.session_state:
         st.session_state.ema_carcasse_state = None
     if 'ema_faraday_state' not in st.session_state:
         st.session_state.ema_faraday_state = None
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🛠️ Données & Sauvegarde")
-
-    if st.sidebar.button("Réinitialiser l'historique"):
-        st.session_state.time_steps = []
-        st.session_state.raw_carcasse = []
-        st.session_state.filtered_carcasse = []
-        st.session_state.raw_faraday = []
-        st.session_state.filtered_faraday = []
-        st.session_state.charge_faraday_pC = []
-        st.session_state.voltage_faraday = []
-        st.session_state.delta_i_differential = []
-        st.session_state.efficiencies_calculated = []
-        st.session_state.instantaneous_mass_flow = []
-        st.session_state.current_step = 0
-        st.session_state.ema_carcasse_state = None
-        st.session_state.ema_faraday_state = None
-        st.rerun()
-
-    # --- EXPORTATION DES SIGNAUX NETTOYÉS ---
-    lengths = [
-        len(st.session_state.time_steps),
-        len(st.session_state.raw_carcasse),
-        len(st.session_state.filtered_carcasse),
-        len(st.session_state.raw_faraday),
-        len(st.session_state.filtered_faraday),
-        len(st.session_state.voltage_faraday),
-        len(st.session_state.delta_i_differential),
-        len(st.session_state.efficiencies_calculated),
-        len(st.session_state.instantaneous_mass_flow)
-    ]
-    min_len = min(lengths) if lengths else 0
-
-    if min_len > 0:
-        df_export = pd.DataFrame({
-            "Temps (Index)": list(st.session_state.time_steps)[:min_len],
-            "I_Carcasse Brut (nA)": list(st.session_state.raw_carcasse)[:min_len],
-            "I_Carcasse Filtré (nA)": list(st.session_state.filtered_carcasse)[:min_len],
-            "I_Faraday Brut (nA)": list(st.session_state.raw_faraday)[:min_len],
-            "I_Faraday Filtré (nA)": list(st.session_state.filtered_faraday)[:min_len],
-            "Tension Cage de Faraday (V)": list(st.session_state.voltage_faraday)[:min_len],
-            "Écart Électrique Delta_I (nA)": list(st.session_state.delta_i_differential)[:min_len],
-            "Rendement Électrostatique (%)": list(st.session_state.efficiencies_calculated)[:min_len],
-            "Débit Massique de Fuite (mg/s)": list(st.session_state.instantaneous_mass_flow)[:min_len]
-        })
-        
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            df_export.to_excel(writer, index=False, sheet_name="Faraday_Exclusive_Data")
-        excel_buffer.seek(0)
-        
-        st.sidebar.download_button(
-            label="📥 Télécharger le registre d'induction (.xlsx)",
-            data=excel_buffer,
-            file_name="rapport_faraday_exclusif.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="excel_download"
-        )
-    else:
-        st.sidebar.caption("⏳ En attente de stabilisation des signaux...")
 
     placeholder = st.empty()
 
@@ -192,168 +121,143 @@ with tab1:
                 t, trigger_mechanical, gas_temp, trigger_cem_noise
             )
              
-            # Filtrage numérique exponentiel (EMA) - Ligne Carcasse
+            # Filtrage Numérique (EMA)
             if st.session_state.ema_carcasse_state is None:
                 st.session_state.ema_carcasse_state = r_carcasse
             else:
                 st.session_state.ema_carcasse_state = (sim.alpha * r_carcasse) + ((1.0 - sim.alpha) * st.session_state.ema_carcasse_state)
              
-            # Filtrage numérique exponentiel (EMA) - Cage de Faraday
             if st.session_state.ema_faraday_state is None:
                 st.session_state.ema_faraday_state = r_faraday
             else:
                 st.session_state.ema_faraday_state = (sim.alpha * r_faraday) + ((1.0 - sim.alpha) * st.session_state.ema_faraday_state)
              
-            # --- RELATION COURANT -> CHARGE -> TENSION COAXIALE ---
-            # Fenêtre d'intégration d'acquisition équivalente de dt = 100 ms
-            # Q (pC) = I (nA) * dt (ms)
-            q_faraday_pC = st.session_state.ema_faraday_state * 100.0
-            v_real_faraday = q_faraday_pC / 19.33  # V = Q_pC / C_pF
+            # Conversion de tension vraie sur la cage de Faraday (Signal Positif)
+            v_real_faraday = (st.session_state.ema_faraday_state * 1e-9) * sim.r_shunt
             
-            # Évaluation différentielle en temps réel
-            delta_i = abs(st.session_state.ema_carcasse_state - st.session_state.ema_faraday_state)
-             
-            # Calcul du rendement instantané par la cage de Faraday
+            # Calcul de l'efficacité estimée via l'induction positive
             facteur_t = np.sqrt((gas_temp + 273.15) / 293.15)
-            charge_specifique_actuelle = sim.k_tribo_base * facteur_t
-            i_max_theorique = ((sim.base_concentration * q_sec) / 1000.0) * charge_specifique_actuelle
-            estimated_eff_faraday = 1.0 - (st.session_state.ema_faraday_state / i_max_theorique)
+            i_max_theorique = ((sim.base_concentration * q_sec) / 1000.0) * (sim.k_tribo_base * facteur_t)
+            estimated_eff = 1.0 - (st.session_state.ema_faraday_state / i_max_theorique)
             
-            # Remplissage des registres (Fenêtre glissante stricte de 100 itérations)
+            # Sauvegarde dans les registres glissants
             st.session_state.time_steps.append(t)
             st.session_state.raw_carcasse.append(r_carcasse)
             st.session_state.filtered_carcasse.append(st.session_state.ema_carcasse_state)
             st.session_state.raw_faraday.append(r_faraday)
             st.session_state.filtered_faraday.append(st.session_state.ema_faraday_state)
-            st.session_state.charge_faraday_pC.append(q_faraday_pC)
             st.session_state.voltage_faraday.append(v_real_faraday)
-            st.session_state.delta_i_differential.append(delta_i)
-            st.session_state.efficiencies_calculated.append(estimated_eff_faraday * 100.0)
-            st.session_state.instantaneous_mass_flow.append(m_fuite_sec * 1000.0) # conversion en mg/s
+            st.session_state.efficiencies_calculated.append(estimated_eff * 100.0)
              
-            if len(st.session_state.time_steps) > 100:
+            if len(st.session_state.time_steps) > 80:
                 st.session_state.time_steps.pop(0)
                 st.session_state.raw_carcasse.pop(0)
                 st.session_state.filtered_carcasse.pop(0)
                 st.session_state.raw_faraday.pop(0)
                 st.session_state.filtered_faraday.pop(0)
-                st.session_state.charge_faraday_pC.pop(0)
                 st.session_state.voltage_faraday.pop(0)
-                st.session_state.delta_i_differential.pop(0)
                 st.session_state.efficiencies_calculated.pop(0)
-                st.session_state.instantaneous_mass_flow.pop(0)
                  
-            # --- CONSTRUCTION DES GRAPHES SANS INSTRUMENT D'IMPACT ---
+            # --- CONFIGURATION DES PLOTS SIMULTANÉS ---
             fig = make_subplots(
-                rows=3, cols=1, 
+                rows=2, cols=1, 
                 shared_xaxes=True, 
-                vertical_spacing=0.08,
+                vertical_spacing=0.12,
                 subplot_titles=(
-                    "Bilan de Courant : Courant de drainage carcasse (I_carc) vs Courant d'induction Faraday (I_far)", 
-                    "Dynamique de Tension de la Cage Coaxiale Réelle (V_cage calculée sur C = 19.33 pF)", 
-                    "Rendement Électrostatique de Séparation Déduit (%)"
+                    "📈 Dynamique des Signaux Électriques Parallèles (Polarités Réelles)", 
+                    "📊 Évolution du Rendement Global Déduit par Induction"
                 )
             )
             
-            # Graphe 1 : Courants d'équilibre (Carcasse vs Faraday)
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_carcasse),
-                                     name="Carcasse : Brut", line=dict(color='rgba(230, 126, 34, 0.2)', width=1)), row=1, col=1)
+            # Paramètre 1 : Drainage Carcasse (Charges Négatives)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_carcasse),
-                                     name="Carcasse : Filtré (I_carc)", line=dict(color='#e67e22', width=2)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_faraday),
-                                     name="Faraday : Brut", line=dict(color='rgba(52, 152, 219, 0.2)', width=1)), row=1, col=1)
+                                     name="Courant Carcasse (Drainage -)", line=dict(color='#e67e22', width=2)), row=1, col=1)
+            
+            # Paramètre 2 : Cage de Faraday (Induction +)
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_faraday),
-                                     name="Faraday : Filtré (I_far)", line=dict(color='#3498db', width=2.5)), row=1, col=1)
+                                     name="Courant Cage Faraday (Induction +)", line=dict(color='#2980b9', width=2.5)), row=1, col=1)
             
-            # Graphe 2 : Tension calculée aux bornes de la cage de 19.33 pF
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.voltage_faraday),
-                                     name="Tension d'influence (V_cage)", line=dict(color='#9b59b6', width=2.5)), row=2, col=1)
-            
-            # Graphe 3 : Rendement de captage déduit
+            # Rendement
             fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.efficiencies_calculated),
-                                     name="Rendement Électrostatique", line=dict(color='#2ecc71', width=2.5)), row=3, col=1)
-            fig.add_hline(y=99.2, line_dash="dash", line_color="red", annotation_text="Limite Rejet Seuil Bas (99.2%)", row=3, col=1)
-             
-            fig.update_layout(height=800, showlegend=True, margin=dict(l=20, r=20, t=30, b=10))
-            fig.update_yaxes(title_text="Intensités (nA)", row=1, col=1)
-            fig.update_yaxes(title_text="Tension (V)", row=2, col=1)
-            fig.update_yaxes(title_text="Efficacité (%)", row=3, col=1)
-            fig.update_xaxes(title_text="Temps (Itérations)", row=3, col=1)
-             
+                                     name="Rendement Électrostatique (%)", line=dict(color='#2ecc71', width=2)), row=2, col=1)
+            
+            fig.update_layout(height=650, margin=dict(l=30, r=30, t=40, b=10))
+            fig.update_yaxes(title_text="Courants (nA)", row=1, col=1)
+            fig.update_yaxes(title_text="Rendement (%)", row=2, col=1)
+            
             with placeholder.container():
-                # Diagnostics automatiques basés sur la cage de Faraday
-                if t_damage:
-                    st.error(f"🚨 EXTRUSION THERMIQUE CRITIQUE : Gaz à {gas_temp}°C > Seuil de tenue du polymère P84 (240°C). Rupture des manches suspectée.")
-                elif delta_i > 5.0 and trigger_cem_noise:
-                    st.warning(f"⚡ DISCORDANCE CEM INDUSTRIELLE : Le bruit de masse affecte I_carcasse ($\Delta I$ = {delta_i:.2f} nA). La cage de Faraday reste stable et immunisée.")
-                elif estimated_eff_faraday < 0.992:
-                    st.error(f"📉 ANOMALIE DE FILTRATION CORRÉLÉE : La signature de la cage confirme une fuite massive de poussières. Rendement : {estimated_eff_faraday*100:.3f} %.")
+                # Diagnostics d'États
+                delta_verification = abs(abs(st.session_state.ema_carcasse_state) - st.session_state.ema_faraday_state)
+                if delta_verification > 5.0 and trigger_cem_noise:
+                    st.warning(f"⚡ ALERTE DISCORDANCE DE POLARITÉ : Écart de masse de {delta_verification:.2f} nA détecté. Des parasites induits perturbent le réseau de terre de la carcasse, mais la cage de Faraday reste stable.")
+                elif estimated_eff < 0.992:
+                    st.error(f"📉 FUITE CONFIRMÉE : Hausse corrélée sur le flux d'induction positif. Rendement bas : {estimated_eff*100:.3f}%")
                 else:
-                    st.success(f"✅ PROCÉDÉ SÉCURISÉ : Équilibre des charges parfait à {gas_temp}°C. Émission sous contrôle.")
+                    st.success("✅ COMPORTEMENT NOMINAL : Cohérence parfaite entre drainage de masse et induction dynamique.")
+
+                # AFFICHAGE SIMULTANÉ VIA DES COLONNES DE METRICS COMPLÈTES
+                st.markdown("#### ⚙️ Comparatif Temps Réel des Deux Flux de Charge")
+                col1, col2, col3, col4 = st.columns(4)
                 
-                # PANNEAU NUMÉRIQUE - INTÉGRATION GÉNIE ÉLECTRIQUE
-                st.markdown("### 🎛️ Paramètres Électrostatiques Centrés sur la Cage (C = 19.33 pF)")
-                c1, c2, c3, c4 = st.columns(4)
+                with col1:
+                    st.metric(
+                        label="🔏 Courant Carcasse (Drainage -)",
+                        value=f"{st.session_state.ema_carcasse_state:.2f} nA",
+                        delta="Évacuation vers Masse",
+                        delta_color="inverse"
+                    )
+                with col2:
+                    st.metric(
+                        label="🌐 Courant Faraday (Induction +)",
+                        value=f"{st.session_state.ema_faraday_state:.2f} nA",
+                        delta="Induction Particulaire"
+                    )
+                with col3:
+                    st.metric(
+                        label="🔌 Tension Shunt Cage",
+                        value=f"{v_real_faraday:.3f} V",
+                        delta="Signal Échantillonné"
+                    )
+                with col4:
+                    st.metric(
+                        label="📈 Rendement Filtrage",
+                        value=f"{estimated_eff * 100.0:.3f} %",
+                        delta=f"{m_fuite_sec*1000:.1f} mg/s de fuite"
+                    )
                 
-                c1.metric(
-                    label="Rendement de Filtration Estimé",
-                    value=f"{estimated_eff_faraday * 100.0:.3f} %"
-                )
-                
-                c2.metric(
-                    label="Courant d'Induction Cage (I_far)",
-                    value=f"{st.session_state.ema_faraday_state:.2f} nA",
-                    delta=f"{q_faraday_pC:.1f} pC (Charge Induite)"
-                )
-                
-                c3.metric(
-                    label="Tension de Sortie Intégrée",
-                    value=f"{v_real_faraday:.3f} V",
-                    delta="Blindage Coaxial Actif"
-                )
-                
-                c4.metric(
-                    label="Débit de Poussière Rejeté",
-                    value=f"{m_fuite_sec * 1000.0:.1f} mg/s",
-                    delta=f"$\Delta I$ masse = {delta_i:.2f} nA",
-                    delta_color="inverse" if delta_i > 2.0 else "normal"
-                )
-                
-                st.markdown("---")
                 st.plotly_chart(fig, use_container_width=True)
-                 
+                
             st.session_state.current_step += 1
             time.sleep(speed)
     else:
-        st.info("Système en pause. Activez le commutateur du volet latéral pour démarrer le monitoring exclusif de la cage de Faraday.")
+        st.info("Système en attente. Veuillez basculer le commutateur latéral pour lancer la capture double pôle.")
 
 # ==========================================
-# ONGLET 2 : ÉQUATIONS ET LOGIQUE GÉOMÉTRIQUE
+# ONGLET 2 : LOGIQUE DES FLUX ET EQUATIONS
 # ==========================================
 with tab2:
-    st.header("Physique de l'Induction Sans Contact (Cage de Faraday Coaxiale)")
-    
-    st.markdown("### 📐 Géométrie Singulière du Prototype Coaxial")
+    st.header("Modélisation Avancée du Bilan Électrostatique")
     st.markdown("""
-    La surveillance repose sur l'équivalence stricte entre le courant de fuite évacué par la trame métallique conductrice du filtre et le courant d'influence mesuré en aval. 
-    L'élimination des sondes à impact permet d'éviter l'encrassement physique lié aux particules à haute température.
-    
-    * **Longueur utile de détection ($L$) :** $10\\text{ cm} = 0,10\\text{ m}$
-    * **Rayon intérieur de l'électrode ($R_1$) :** $30\\text{ mm} = 0,03\\text{ m}$ (Passage libre total de $\\varnothing 60\\text{ mm}$)
-    * **Rayon extérieur de blindage ($R_2$) :** $40\\text{ mm} = 0,04\\text{ m}$ (Cylindre de garde externe de $\\varnothing 80\\text{ mm}$)
+    En vertu de la **loi de conservation de la charge électrique**, le système implémenté met en évidence deux manifestations mesurables distinctes provenant d'un unique phénomène physique (l'électrisation triboélectrique dans le filtre) :
     """)
     
-    st.info("La capacité équivalente du capteur s'élève à **19,33 pF**, permettant une dynamique de conversion tension-charge hautement réactive.")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.subheader("1. Courant de Drainage Carcasse ($I_{\\text{carc}}$)")
+        st.markdown("> **Nature :** Évacuation conductive vers la prise de terre du filtre.")
+        st.markdown("> **Signe :** Négatif (Accumulation stationnaire sur le média filtrant en polymère).")
+        st.latex(r"I_{\text{carc}}(t) = - \left( \dot{m}_{\text{fuite}}(t) \cdot q_{\text{spécifique}} \right) + \xi_{\text{CEM}}(t)")
+        st.caption("Remarque : Ce paramètre est sensible aux courants parasites de masse $\\xi_{\\text{CEM}}$ générés par les gros variateurs de vitesse de la cimenterie.")
+
+    with col_b:
+        st.subheader("2. Courant d'Induction Faraday ($I_{\\text{far}}$)")
+        st.markdown("> **Nature :** Influence électrostatique sans contact à travers le cylindre intérieur.")
+        st.markdown("> **Signe :** Positif (Transporté par le flux de particules de ciment en suspension).")
+        st.latex(r"I_{\text{far}}(t) = + \left( \dot{m}_{\text{fuite}}(t) \cdot q_{\text{spécifique}} \right) + \xi_{\text{cage}}")
+        st.caption("Remarque : Grâce au cylindre de garde externe de $\\varnothing 80\\text{ mm}$ relié à une masse propre, le bruit électromagnétique $\\xi_{\\text{cage}}$ est négligeable.")
 
     st.markdown("---")
-    st.subheader("🔬 Formulation des Phénomènes d'Influence Électrostatique")
-     
-    st.markdown("#### A. Traduction du Flux Massique en Intensité Courante")
-    st.write("Le nuage de ciment en rupture de manche cède ses charges négatives à la carcasse et transporte une charge positive nette. Le courant d'induction induit dans la cage est régi par :")
-    st.latex(r"I_{\text{Faraday}}(t) = \dot{m}_{\text{fuite}}(t) \cdot k_{\text{tribo}} \cdot \sqrt{\frac{T_{\text{gaz}} + 273.15}{293.15}}")
-    st.write("Où la masse particulaire $\\dot{m}_{\\text{fuite}}$ est calculée en fonction du débit d'extraction de la cimenterie d'Oggaz ($450\\,000\\text{ m}^3/\\text{h}$).")
-
-    st.markdown("#### B. Équation Fondamentale de la Tension de Sortie")
-    st.write("La tension instantanée mesurée par le circuit d'acquisition de la carte électronique est définie par la loi des condensateurs :")
-    st.latex(r"V_{\text{cage}}(t) = \frac{Q_{\text{induit}}(t)}{C_{\text{cage}}} = \frac{\int_{0}^{\Delta t} I_{\text{Faraday}}(t) \, dt}{19,33 \times 10^{-12}}")
-    st.write("Le blindage extérieur relié à la masse isole le cylindre interne de $60\\text{ mm}$, protégeant la mesure des variations brusques de potentiel que subit la carcasse de l'usine sous l'effet des hacheurs ou des moteurs de forte puissance.")
+    st.markdown("### Équation Finale Inter-paramètres")
+    st.write("En l'absence de perturbations électromagnétiques industrielles sévères, la relation dynamique vérifie le théorème de neutralité :")
+    st.latex(r"|I_{\text{Faraday}}(t)| - |I_{\text{Carcasse}}(t)| \approx 0")
+    st.write("Toute divergence notable entre ces deux courbes (affichées en parallèle sur le graphique du premier onglet) permet de discriminer instantanément un problème de filtration réel d'un simple bruit de masse de l'usine.")
