@@ -16,44 +16,60 @@ st.set_page_config(
 st.title("SmartFilter Monitor")
 st.subheader("Supervision Haute Température & Diagnostic Électrostatique - Application Cimenterie")
 
-# --- COEUR DE MODÉLISATION PHYSIQUE (CHARGE ÉLECTROSTATIQUE) ---
-class CementFilterSimulation:
+# --- COEUR DE MODÉLISATION PHYSIQUE DES DEUX TECHNOLOGIES ---
+class CementFilterAdvancedSimulation:
     def __init__(self):
-        # Paramètres procédé
-        self.base_concentration = 1200.0  # mg/m^3 (Charge lourde du four de cimenterie)
-        self.nominal_efficiency = 0.9995  # 99.95% (Haute performance avec membrane PTFE)
-        self.k_zero = 5.0                 # Sensibilité de base du capteur en pC/(mg/m^3)
-        self.alpha = 0.15                 # Coefficient du filtre lisseur EMA
-        self.t_critique_tissu = 240.0     # Limite thermique du Polyimide P84 (°C)
-        self.debit_air_nominal = 100000.0 # m^3/h (Débit typique d'un compartiment de filtre)
+        # Paramètres procédé généraux
+        self.base_concentration = 1200.0  # mg/m^3 (Charge brute du four)
+        self.nominal_efficiency = 0.9995  # 99.95% (Opération nominale)
+        self.t_critique_tissu = 240.0     # Limite du Polyimide P84 (°C)
+        self.debit_air_nominal = 100000.0 # m^3/h
 
-    def generate_data_point(self, t, is_mechanically_damaged, temperature):
-        # 1. Calcul de la dégradation (Mécanique ou Thermique si T > T_critique)
+        # Paramètres spécifiques : Capteur 1 (Sonde à Impact classique)
+        self.k_impact_zero = 4.0          # Gain initial par impact
+        self.noise_impact = 6.5           # Bruit fort (Pas de blindage Faraday)
+        
+        # Paramètres spécifiques : Capteur 2 (Votre Cage de Faraday coaxiale)
+        self.k_faraday_zero = 5.0         # Gain initial par induction
+        self.noise_faraday = 1.2          # Bruit très faible (Blindage par cylindre externe)
+
+        self.alpha = 0.15                 # Coefficient du filtre EMA
+
+    def generate_data_point(self, t, is_mechanically_damaged, temperature, fouling_active):
+        # 1. Simulation de la dégradation des manches (Thermique ou Mécanique)
         thermal_damage = temperature > self.t_critique_tissu
-         
         if is_mechanically_damaged or thermal_damage:
-            current_eff = 0.978  # Rupture de l'étanchéité des manches
+            current_eff = 0.978  
         else:
             current_eff = self.nominal_efficiency
          
-        # 2. Concentration d'entrée brute du four (fluctuations industrielles)
+        # 2. Concentration réelle en sortie du filtre
         c_in = max(0.0, np.random.normal(self.base_concentration, 60.0))
-         
-        # 3. Concentration de sortie effective
         c_out = c_in * (1.0 - current_eff)
          
-        # 4. Impact de la température sur la charge induite
-        # La température dilate les gaz et augmente la vitesse des chocs particulaires sur la sonde.
+        # 3. Effet de la température sur la dynamique gazeuse (dilatation)
         facteur_temperature = np.sqrt((temperature + 273.15) / 293.15)
-        sensor_gain = self.k_zero * facteur_temperature
-         
-        # 5. Génération de la charge brute induite (en pC) avec bruit de fond
-        raw_charge = max(0.0, (c_out * sensor_gain) + np.random.normal(0.0, 2.0))
-         
-        return raw_charge, current_eff, thermal_damage
+        
+        # --- CAPTEUR 1 : MESURE PAR IMPACT ---
+        # Si l'encrassement est actif, la sonde s'entoure d'une couche isolante de ciment
+        # qui réduit exponentiellement sa capacité à capter les chocs directs.
+        if fouling_active:
+            facteur_encrassement = np.exp(-0.015 * t)  # Perte de sensibilité continue
+        else:
+            facteur_encrassement = 1.0
+            
+        gain_impact = self.k_impact_zero * facteur_temperature * facteur_encrassement
+        raw_impact = max(0.0, (c_out * gain_impact) + np.random.normal(0.0, self.noise_impact))
 
-# Initialisation de la simulation
-sim = CementFilterSimulation()
+        # --- CAPTEUR 2 : CAGE DE FARADAY (ÉCOULEMENT) ---
+        # Pas d'encrassement car la mesure se fait à travers le flux gazeux sans contact (Théorème de Gauss)
+        gain_faraday = self.k_faraday_zero * facteur_temperature
+        raw_faraday = max(0.0, (c_out * gain_faraday) + np.random.normal(0.0, self.noise_faraday))
+         
+        return raw_impact, raw_faraday, current_eff, thermal_damage, facteur_encrassement
+
+# Initialisation
+sim = CementFilterAdvancedSimulation()
 
 # --- ONGLETS ---
 tab1, tab2 = st.tabs(["📊 Supervision Process Temps Réel", "🔬 Fiche Technique Tissu & Équations"])
@@ -69,213 +85,231 @@ with tab1:
     st.sidebar.subheader("Contrôle du Procédé Four/Broyeur")
     gas_temp = st.sidebar.slider("Température des gaz entrants (°C)", 120, 280, 210)
     trigger_mechanical = st.sidebar.toggle("Simuler une déchirure mécanique", value=False)
+    trigger_fouling = st.sidebar.toggle("Activer l'encrassement (Sonde Impact)", value=True)
     speed = st.sidebar.slider("Fréquence d'échantillonnage (s)", 0.1, 1.0, 0.3)
 
-    # --- INITIALISATION INDÉPENDANTE DE CHAQUE VARIABLE ---
+    # --- INITIALISATION DE L'HISTORIQUE DES SESSIONS ---
     if 'time_steps' not in st.session_state:
         st.session_state.time_steps = []
-        
-    if 'raw_charges' not in st.session_state:
-        st.session_state.raw_charges = []
-        
-    if 'filtered_charges' not in st.session_state:
-        st.session_state.filtered_charges = []
-        
-    if 'efficiencies' not in st.session_state:
-        st.session_state.efficiencies = []
-        
+    if 'raw_impact' not in st.session_state:
+        st.session_state.raw_impact = []
+    if 'filtered_impact' not in st.session_state:
+        st.session_state.filtered_impact = []
+    if 'raw_faraday' not in st.session_state:
+        st.session_state.raw_faraday = []
+    if 'filtered_faraday' not in st.session_state:
+        st.session_state.filtered_faraday = []
+    if 'efficiencies_faraday' not in st.session_state:
+        st.session_state.efficiencies_faraday = []
     if 'current_step' not in st.session_state:
         st.session_state.current_step = 0
-        
-    if 'ema_state' not in st.session_state:
-        st.session_state.ema_state = None
+    if 'ema_impact_state' not in st.session_state:
+        st.session_state.ema_impact_state = None
+    if 'ema_faraday_state' not in st.session_state:
+        st.session_state.ema_faraday_state = None
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("🛠️ Actions & Export")
 
     if st.sidebar.button("Réinitialiser l'historique"):
         st.session_state.time_steps = []
-        st.session_state.raw_charges = []
-        st.session_state.filtered_charges = []
-        st.session_state.efficiencies = []
+        st.session_state.raw_impact = []
+        st.session_state.filtered_impact = []
+        st.session_state.raw_faraday = []
+        st.session_state.filtered_faraday = []
+        st.session_state.efficiencies_faraday = []
         st.session_state.current_step = 0
-        st.session_state.ema_state = None
+        st.session_state.ema_impact_state = None
+        st.session_state.ema_faraday_state = None
         st.rerun()
 
-    # --- BLOC D'EXPORTATION EXCEL DYNAMIQUE ---
+    # --- SCRIPT DE COMPILATION EXCEL EXPLOITABLE ---
     if len(st.session_state.time_steps) > 0:
-        # Création du DataFrame avec toutes les courbes affichées
         df_export = pd.DataFrame({
             "Temps (Iterations)": list(st.session_state.time_steps),
-            "Charge Brute Induite (pC)": list(st.session_state.raw_charges),
-            "Charge Filtree EMA (pC)": list(st.session_state.filtered_charges),
-            "Rendement Estime (%)": list(st.session_state.efficiencies)
+            "Sonde Impact - Brute (pC)": list(st.session_state.raw_impact),
+            "Sonde Impact - Filtree EMA (pC)": list(st.session_state.filtered_impact),
+            "Cage Faraday - Brute (pC)": list(st.session_state.raw_faraday),
+            "Cage Faraday - Filtree EMA (pC)": list(st.session_state.filtered_faraday),
+            "Rendement Estime par Cage Faraday (%)": list(st.session_state.efficiencies_faraday)
         })
         
-        # Écriture en mémoire du fichier Excel
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            df_export.to_excel(writer, index=False, sheet_name="Donnees_Capteur")
+            df_export.to_excel(writer, index=False, sheet_name="Comparatif_Capteurs")
         excel_buffer.seek(0)
         
-        # Bouton de téléchargement
         st.sidebar.download_button(
-            label="📥 Télécharger les courbes (.xlsx)",
+            label="📥 Télécharger l'étude comparative (.xlsx)",
             data=excel_buffer,
-            file_name="donnees_electrostatic_smartfilter.xlsx",
+            file_name="comparatif_impact_vs_faraday.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="excel_download"
         )
     else:
-        st.sidebar.caption("⏳ En attente de données pour l'export Excel...")
+        st.sidebar.caption("⏳ En attente de signaux pour l'exportation...")
 
     placeholder = st.empty()
 
     if run_simulation:
         while True:
             t = st.session_state.current_step
-            raw_chg, true_eff, t_damage = sim.generate_data_point(t, trigger_mechanical, gas_temp)
+            r_impact, r_faraday, true_eff, t_damage, f_impact_ratio = sim.generate_data_point(
+                t, trigger_mechanical, gas_temp, trigger_fouling
+            )
              
-            # Application du filtre numérique EMA sur la charge
-            if st.session_state.ema_state is None:
-                st.session_state.ema_state = raw_chg
+            # Traitement par filtre numérique (EMA) pour la sonde à Impact
+            if st.session_state.ema_impact_state is None:
+                st.session_state.ema_impact_state = r_impact
             else:
-                st.session_state.ema_state = (sim.alpha * raw_chg) + ((1.0 - sim.alpha) * st.session_state.ema_state)
+                st.session_state.ema_impact_state = (sim.alpha * r_impact) + ((1.0 - sim.alpha) * st.session_state.ema_impact_state)
              
-            # Ajustement thermodynamique inverse du gain du capteur
+            # Traitement par filtre numérique (EMA) pour la Cage de Faraday
+            if st.session_state.ema_faraday_state is None:
+                st.session_state.ema_faraday_state = r_faraday
+            else:
+                st.session_state.ema_faraday_state = (sim.alpha * r_faraday) + ((1.0 - sim.alpha) * st.session_state.ema_faraday_state)
+             
+            # Inversion mathématique thermodynamique pour estimer le rendement via votre Cage de Faraday
             facteur_t = np.sqrt((gas_temp + 273.15) / 293.15)
-            dynamic_gain = sim.k_zero * facteur_t
-             
-            # Inversion mathématique : conversion Charge (pC) -> Concentration -> Rendement
-            estimated_c_out = st.session_state.ema_state / dynamic_gain
-            estimated_eff = 1.0 - (estimated_c_out / sim.base_concentration)
+            dynamic_gain_faraday = sim.k_faraday_zero * facteur_t
+            estimated_c_out_faraday = st.session_state.ema_faraday_state / dynamic_gain_faraday
+            estimated_eff_faraday = 1.0 - (estimated_c_out_faraday / sim.base_concentration)
             
-            # Calcul du débit massique réel rejeté
-            flux_massique_kgh = (estimated_c_out * sim.debit_air_nominal) / 1000000.0
+            # Débit massique absolu (kg/h) calculé sur l'induction fiable de la cage de Faraday
+            flux_massique_kgh = (estimated_c_out_faraday * sim.debit_air_nominal) / 1000000.0
              
-            # Stockage dans l'historique glissant
+            # Remplissage des buffers historiques (limités aux 100 dernières itérations)
             st.session_state.time_steps.append(t)
-            st.session_state.raw_charges.append(raw_chg)
-            st.session_state.filtered_charges.append(st.session_state.ema_state)
-            st.session_state.efficiencies.append(estimated_eff * 100.0)
+            st.session_state.raw_impact.append(r_impact)
+            st.session_state.filtered_impact.append(st.session_state.ema_impact_state)
+            st.session_state.raw_faraday.append(r_faraday)
+            st.session_state.filtered_faraday.append(st.session_state.ema_faraday_state)
+            st.session_state.efficiencies_faraday.append(estimated_eff_faraday * 100.0)
              
             if len(st.session_state.time_steps) > 100:
                 st.session_state.time_steps.pop(0)
-                st.session_state.raw_charges.pop(0)
-                st.session_state.filtered_charges.pop(0)
-                st.session_state.efficiencies.pop(0)
+                st.session_state.raw_impact.pop(0)
+                st.session_state.filtered_impact.pop(0)
+                st.session_state.raw_faraday.pop(0)
+                st.session_state.filtered_faraday.pop(0)
+                st.session_state.efficiencies_faraday.pop(0)
                  
-            # Tracé dynamique Plotly
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15)
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_charges),
-                                     name="Charge Brute Induite (pC)", line=dict(color='rgba(160,160,160,0.4)', width=1)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_charges),
-                                     name="Charge Filtrée (EMA)", line=dict(color='#1f77b4', width=2)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.efficiencies),
-                                     name="Rendement Estimé (%)", line=dict(color='#2ca02c', width=2.5)), row=2, col=1)
-            fig.add_hline(y=99.2, line_dash="dash", line_color="red", annotation_text="Seuil Alarme (99.2%)", row=2, col=1)
+            # --- CONFIGURATION DU TRACÉ DES GRAPHES COMPARATIFS ---
+            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                                subplot_titles=("Sonde Triboélectrique par Impact Claddée (Non blindée)", 
+                                                "Votre Capteur Coaxial à Écoulement (Cage de Faraday Blindée)", 
+                                                "Rendement Calculé par la Cage de Faraday (%)"))
+            
+            # Graphe 1 : Sonde classique à Impact
+            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_impact),
+                                     name="Impact : Brute", line=dict(color='rgba(219, 68, 85, 0.3)', width=1)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_impact),
+                                     name="Impact : Filtrée (EMA)", line=dict(color='#db4455', width=2)), row=1, col=1)
+            
+            # Graphe 2 : Votre Cage de Faraday
+            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.raw_faraday),
+                                     name="Faraday : Brute", line=dict(color='rgba(31, 119, 180, 0.3)', width=1)), row=2, col=1)
+            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.filtered_faraday),
+                                     name="Faraday : Filtrée (EMA)", line=dict(color='#1f77b4', width=2.5)), row=2, col=1)
+            
+            # Graphe 3 : Rendement déduit par la technique stable (Faraday)
+            fig.add_trace(go.Scatter(x=list(st.session_state.time_steps), y=list(st.session_state.efficiencies_faraday),
+                                     name="Rendement Faraday", line=dict(color='#2ca02c', width=2.5)), row=3, col=1)
+            fig.add_hline(y=99.2, line_dash="dash", line_color="orange", annotation_text="Seuil Alarme (99.2%)", row=3, col=1)
              
-            fig.update_layout(height=500, showlegend=True, margin=dict(l=20, r=20, t=10, b=10))
-            fig.update_yaxes(title_text="Charge Électrostatique (pC)", row=1, col=1)
-            fig.update_yaxes(title_text="Rendement (%)", row=2, col=1)
-            fig.update_xaxes(title_text="Temps (Itérations)", row=2, col=1)
+            fig.update_layout(height=700, showlegend=True, margin=dict(l=20, r=20, t=30, b=10))
+            fig.update_yaxes(title_text="Signal (pC)", row=1, col=1)
+            fig.update_yaxes(title_text="Signal (pC)", row=2, col=1)
+            fig.update_yaxes(title_text="Rendement (%)", row=3, col=1)
+            fig.update_xaxes(title_text="Temps (Itérations)", row=3, col=1)
              
             with placeholder.container():
-                # Section 1 : Messages d'alertes
+                # Alarmes de sécurité
                 if t_damage:
-                    st.error(f"🚨 ALARME THERMIQUE : Gaz à {gas_temp}°C > Limite du tissu Polyimide P84 (240°C) ! Destruction thermique des manches en cours.")
-                elif estimated_eff < 0.992:
-                    st.warning(f"⚠️ ANOMALIE DE FILTRATION : Fuite détectée (Rupture ou usure mécanique).")
+                    st.error(f"🚨 STRATIFICATION THERMIQUE CRITIQUE : Gaz à {gas_temp}°C > Seuil P84 (240°C). Rupture physique imminente.")
+                elif estimated_eff_faraday < 0.992:
+                    st.warning(f"⚠️ SIGNAL DE FUITE RECONNU : La cage de Faraday confirme une baisse de filtration.")
                 else:
-                    st.success(f"✅ PROCÉDÉ SÉCURISÉ : Tissu P84 stable à {gas_temp}°C. Opération nominale.")
+                    st.success(f"✅ STATUT FILTRE NOMINAL : Écoulement stable à {gas_temp}°C à travers la maille.")
                 
-                # Section 2 : Les Afficheurs Numériques (KPIs)
-                st.markdown("### 🎛️ Indicateurs Numériques de Sortie")
-                m_col1, m_col2, m_col3 = st.columns(3)
+                # SECTION AFFICHEURS COMPARES
+                st.markdown("### 🎛️ Métriques Comparatives des Deux Technologies")
+                c1, c2, c3 = st.columns(3)
                 
-                m_col1.metric(
-                    label="Rendement de Filtration",
-                    value=f"{estimated_eff * 100.0:.3f} %",
-                    delta=f"-{(0.9995 - estimated_eff)*100:.3f} %" if estimated_eff < 0.9995 else None,
+                c1.metric(
+                    label="Rendement Réel (Calculé via Faraday)",
+                    value=f"{estimated_eff_faraday * 100.0:.3f} %",
+                    delta=f"-{(0.9995 - estimated_eff_faraday)*100:.3f} %" if estimated_eff_faraday < 0.9995 else None,
                     delta_color="inverse"
                 )
                 
-                m_col2.metric(
-                    label="Concentration Échappée",
-                    value=f"{estimated_c_out:.2f} mg/m³",
-                    delta=f"+{estimated_c_out - 0.60:.2f} mg/m³" if estimated_c_out > 1.0 else None,
-                    delta_color="inverse"
+                # Comparaison des niveaux de charge filtrée pour mettre en évidence l'affaiblissement par encrassement
+                c2.metric(
+                    label="Signal Cage de Faraday (Stable)",
+                    value=f"{st.session_state.ema_faraday_state:.2f} pC",
+                    delta="Immunisé encrassement"
                 )
                 
-                m_col3.metric(
-                    label="Masse Totale Échappée",
-                    value=f"{flux_massique_kgh:.2f} kg/h",
-                    delta=f"+{flux_massique_kgh - 0.06:.2f} kg/h" if flux_massique_kgh > 0.1 else None,
-                    delta_color="inverse"
+                c3.metric(
+                    label="Signal Sonde Impact (Perte d'efficacité)",
+                    value=f"{st.session_state.ema_impact_state:.2f} pC",
+                    delta=f"Efficacité Capteur: {f_impact_ratio*100:.1f}%",
+                    delta_color="normal" if f_impact_ratio > 0.8 else "inverse"
                 )
-                 
+                
                 st.markdown("---")
-                # Section 3 : Graphiques
                 st.plotly_chart(fig, use_container_width=True)
                  
             st.session_state.current_step += 1
             time.sleep(speed)
     else:
-        st.info("Simulation en pause. Activez le bouton dans la barre latérale pour lancer le monitoring.")
+        st.info("Simulation en pause. Utilisez le volet latéral pour démarrer le monitoring comparatif.")
 
 # ==========================================
 # ONGLET 2 : FICHE TECHNIQUE TISSU & ÉQUATIONS
 # ==========================================
 with tab2:
-    st.header("Spécifications Avancées du Filtre - Environnement Cimenterie")
-     
-    st.subheader("📋 Caractéristiques du Tissu Sélectionné : Polyimide P84®")
-    data_tissu = {
-        "Propriété Physique": [
-            "Composition Chimique", 
-            "Structure de la Fibre", 
-            "Température Maximale en Continu", 
-            "Température Maximale en Pointe (Surge)", 
-            "Traitement de Surface Additionnel",
-            "Résistance aux Acides / Oxydation",
-            "Efficacité Initiale (Particules fines de Ciment)"
+    st.header("Étude Comparative de la Captation Électrostatique")
+    
+    st.markdown("### 📊 Analyse Comparative : Impact Triboélectrique vs Induction Coaxiale")
+    
+    # Tableau comparatif direct des technologies
+    st.markdown("#### Tableau Synoptique Industriel")
+    compa_data = {
+        "Critère d'évaluation": [
+            "Physique fondamentale",
+            "Sensibilité à l'encrassement",
+            "Niveau de bruit de fond (EMI)",
+            "Niveau de maintenance requis",
+            "Évolution temporelle du gain"
         ],
-        "Spécification Technique": [
-            "Polyimide aromatique haute performance (P84)",
-            "Section transversale Trilobale (Augmente la surface active de 80%)",
-            "240 °C",
-            "260 °C",
-            "Lamination d'une membrane microporeuse en PTFE (Téflon)",
-            "Excellente résistance aux gaz de combustion acides (SOx, NOx)",
-            "> 99.95 %"
+        "Sonde à Impact Classique": [
+            "Choc mécanique direct et transfert de charge par friction locale.",
+            "Très élevée. La poussière de ciment crée une couche isolante sur la tige.",
+            "Élevé. L'absence de blindage capte les parasites des moteurs et variateurs.",
+            "Fréquente (Nécessite des nettoyages pneumatiques réguliers).",
+            "Décroissant. Le signal s'atténue à mesure que la sonde s'encrasse."
+        ],
+        "Votre Cage de Faraday (Écoulement)": [
+            "Théorème de Gauss. Induction électrostatique sans contact à travers un flux continu.",
+            "Nul. Aucun contact requis avec l'élément de mesure central.",
+            "Extrêmement faible. Le cylindre externe fait office de blindage à la masse.",
+            "Quasi inexistante (Géométrie coaxiale autonettoyante par le flux gazeux).",
+            "Constant et stable. Uniquement lié à la température et au débit."
         ]
     }
-    st.table(data_tissu)
-     
-    st.markdown("---")
-     
-    st.subheader("🔬 Couplage Thermo-Électrostatique (Équations de Modélisation)")
-     
-    st.markdown("#### A. Corrélation Température-Vitesse-Charge")
-    st.write("Le transfert de charges électriques par frottement cinétique (effet triboélectrique) dépend directement de la vitesse spatiale du gaz. La dilatation thermique des gaz modifie le gain de transfert de charge $k(T)$, exprimé en picocoulombs par unité de concentration :")
-    st.latex(r"k(T) = k_0 \cdot \sqrt{\frac{T_{gaz} + 273.15}{T_{ref} + 273.15}}")
-    st.markdown(r"""
-    * **$k_0$** : Sensibilité initiale de transfert de charge à température de référence ($5.0 \text{ pC}/(\text{mg/m}^3)$)
-    * **$T_{gaz}$** : Température des gaz du four de cimenterie (°C)
-    * **$T_{ref}$** : Température d'étalonnage en laboratoire ($20^\circ\text{C} = 293.15\text{ K}$)
-    """)
+    st.table(compa_data)
 
-    st.markdown("#### B. Équation Fondamentale de la Charge Électrostatique Induite")
-    st.write("La charge instantanée $Q_{raw}(t)$ captée sur l'électrode est proportionnelle à la concentration massique de poussière en sortie, perturbée par un bruit de mesure d'origine électromagnétique $\epsilon(t)$ :")
-    st.latex(r"Q_{raw}(t) = k(T) \cdot \Big[ C_{in}(t) \cdot \big(1 - \eta(t, T)\big)\Big] + \epsilon(t)")
-    st.latex(r"\epsilon(t) \sim \mathcal{N}(0, \, \sigma_{sensor}^2)")
-    st.write("Où $\sigma_{sensor} = 2.0 \text{ pC}$ représente le niveau de bruit de fond de la chaîne d'acquisition.")
+    st.markdown("---")
+    st.subheader("🔬 Équations de Modélisation du Capteur Coaxial (Faraday)")
      
-    st.markdown("#### C. Équation de Filtrage de la Charge (Filtre Numérique)")
-    st.write("Le lissage de la charge s'effectue par une moyenne mobile exponentielle récurrente :")
-    st.latex(r"Q_{filtered}(t) = \alpha \cdot Q_{raw}(t) + (1 - \alpha) \cdot Q_{filtered}(t-1)")
-     
-    st.markdown("#### D. Algorithme d'Estimation du Rendement Industrielle")
-    st.write("En mesurant la charge filtrée $Q_{filtered}(t)$, le système remonte au rendement estimé $\hat{\eta}(t)$ :")
-    st.latex(r"\hat{C}_{out}(t) = \frac{Q_{filtered}(t)}{k(T)}")
-    st.latex(r"\hat{\eta}(t) = 1 - \frac{\hat{C}_{out}(t)}{C_{in, nominal}}")
+    st.markdown("#### A. Application du Théorème de Gauss")
+    st.write("Lorsqu'un nuage de particules portant une charge volumique intrinsèque $q_v(t)$ s'écoule au centre du cylindre de mesure interne, une charge électrique strictement opposée est induite à sa surface par influence totale :")
+    st.latex(r"Q_{induit}(t) = - \iiint_{v} q_v(t) \cdot dV")
+    st.write("Le cylindre coaxial externe est maintenu au potentiel zéro de la terre ($V_{exterieur} = 0\\text{ V}$), annulant le champ électrique externe d'origine parasite.")
+
+    st.markdown("#### B. Dynamique d'atténuation de la sonde d'impact")
+    st.write("À l'inverse, la perte d'efficacité de captation par impact due à l'accumulation de poussières de ciment suit une loi de dégradation exponentielle, paramétrée dans l'application :")
+    st.latex(r"k_{impact}(t) = k_{0, impact} \cdot \sqrt{\frac{T_{gaz} + 273.15}{293.15}} \cdot e^{-\lambda t}")
+    st.write("Où $\\lambda$ représente le coefficient d'encrassement. Cela explique pourquoi, sur vos graphiques, la courbe rouge s'effondre alors que votre courbe bleue (Faraday) reste stable et continue de surveiller fidèlement le rendement réel.")
