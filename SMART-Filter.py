@@ -277,7 +277,7 @@ with tab2:
     st.header("Validation Électrotechnique du Capteur Cylindrique")
     st.markdown("### 📐 Équation de Dimensionnement Fondamentale")
     st.write("La capacité géométrique d'une cage de Faraday coaxiale parfaite s'exprime par la relation de Gauss :")
-    st.latex(r"C_{\text{cage}} = \frac{2 \pi \cdot \varepsilon_0 \cdot \varepsilon_r \cdot L}{\ln\left(\frac{R_2}{R_1}\right)}")
+    st.latex(r"C_{\text{cage}} = \frac{2 \pi \cdot \varepsilon_0 \cdot \varepsilon_r \cdot L}{\ln(R_2 / R_1)}")
     
     st.markdown(f"""
     **Application de vos dimensions physiques réelles :**
